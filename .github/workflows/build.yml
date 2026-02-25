@@ -64,38 +64,67 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Build with tauri-action
+      - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
+        id: tauri-build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           args: ${{ matrix.args }}
           tauriScript: npx tauri
 
-      # Collect artifacts manually (tauri-action uploads to release on tags,
-      # but we also want downloadable artifacts for workflow_dispatch runs)
+      # Debug: show tauri-action outputs and find bundle files
+      - name: Debug build output
+        if: always()
+        shell: bash
+        run: |
+          echo "=== tauri-action artifactPaths output ==="
+          echo '${{ steps.tauri-build.outputs.artifactPaths }}'
+          echo ""
+          echo "=== All bundle files ==="
+          find src-tauri/target -path "*/bundle/*" -type f 2>/dev/null || echo "No bundle files found"
+          echo ""
+          echo "=== Installer files ==="
+          find src-tauri/target -type f \( -name "*.dmg" -o -name "*.deb" -o -name "*.AppImage" -o -name "*.msi" -o -name "*.exe" -o -name "*.app.tar.gz" \) 2>/dev/null || echo "No installer files found"
+
+      # Collect artifacts using tauri-action output
       - name: Collect artifacts
         shell: bash
         run: |
           mkdir -p artifacts
-          find src-tauri/target -type f \( \
-            -name "*.dmg" \
-            -o -name "*.deb" \
-            -o -name "*.AppImage" \
-            -o -name "*.msi" \
-            -o -name "*.app.tar.gz" \
-            -o -name "*.app.tar.gz.sig" \
-          \) ! -name "rw.*" -exec cp {} artifacts/ \; 2>/dev/null || true
-          # Windows NSIS installer
-          find src-tauri/target -path "*/bundle/nsis/*.exe" -exec cp {} artifacts/ \; 2>/dev/null || true
+
+          # Method 1: Use tauri-action output
+          ARTIFACT_PATHS='${{ steps.tauri-build.outputs.artifactPaths }}'
+          if [ -n "$ARTIFACT_PATHS" ] && [ "$ARTIFACT_PATHS" != "" ]; then
+            echo "Using tauri-action artifactPaths..."
+            echo "$ARTIFACT_PATHS" | tr -d '[]"' | tr ',' '\n' | while read -r filepath; do
+              filepath=$(echo "$filepath" | xargs)  # trim whitespace
+              if [ -n "$filepath" ] && [ -f "$filepath" ]; then
+                echo "Copying: $filepath"
+                cp "$filepath" artifacts/
+              fi
+            done
+          fi
+
+          # Method 2: Fallback - find bundle files
+          if [ -z "$(ls -A artifacts 2>/dev/null)" ]; then
+            echo "Fallback: searching for bundle files..."
+            find src-tauri/target -path "*/bundle/dmg/*.dmg" -exec cp {} artifacts/ \; 2>/dev/null || true
+            find src-tauri/target -path "*/bundle/deb/*.deb" -exec cp {} artifacts/ \; 2>/dev/null || true
+            find src-tauri/target -path "*/bundle/appimage/*.AppImage" -exec cp {} artifacts/ \; 2>/dev/null || true
+            find src-tauri/target -path "*/bundle/msi/*.msi" -exec cp {} artifacts/ \; 2>/dev/null || true
+            find src-tauri/target -path "*/bundle/nsis/*.exe" -exec cp {} artifacts/ \; 2>/dev/null || true
+            find src-tauri/target -path "*/bundle/macos/*.app.tar.gz" -exec cp {} artifacts/ \; 2>/dev/null || true
+          fi
+
           echo "=== Collected artifacts ==="
-          ls -lhR artifacts/ 2>/dev/null || echo "artifacts dir empty"
+          ls -lhR artifacts/ 2>/dev/null || echo "No artifacts collected"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: build-${{ matrix.label }}
-          path: artifacts/*
+          path: artifacts/
           retention-days: 30
           if-no-files-found: warn
 
