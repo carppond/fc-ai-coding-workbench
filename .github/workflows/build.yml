@@ -48,7 +48,6 @@ jobs:
           node-version: 20
           cache: npm
 
-      # Linux system dependencies
       - name: Install Linux dependencies
         if: matrix.platform == 'linux'
         run: |
@@ -65,66 +64,61 @@ jobs:
         run: npm ci
 
       - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
-        id: tauri-build
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          args: ${{ matrix.args }}
-          tauriScript: npx tauri
+        shell: bash
+        run: |
+          if [ -n "${{ matrix.args }}" ]; then
+            npx tauri build ${{ matrix.args }}
+          else
+            npx tauri build
+          fi
 
-      # Debug: show tauri-action outputs and find bundle files
-      - name: Debug build output
+      - name: Debug - list bundle output
         if: always()
         shell: bash
         run: |
-          echo "=== tauri-action artifactPaths output ==="
-          echo '${{ steps.tauri-build.outputs.artifactPaths }}'
+          echo "=== pwd ==="
+          pwd
           echo ""
-          echo "=== All bundle files ==="
-          find src-tauri/target -path "*/bundle/*" -type f 2>/dev/null || echo "No bundle files found"
+          echo "=== GITHUB_WORKSPACE ==="
+          echo "$GITHUB_WORKSPACE"
           echo ""
-          echo "=== Installer files ==="
-          find src-tauri/target -type f \( -name "*.dmg" -o -name "*.deb" -o -name "*.AppImage" -o -name "*.msi" -o -name "*.exe" -o -name "*.app.tar.gz" \) 2>/dev/null || echo "No installer files found"
+          echo "=== find all bundle files ==="
+          find "$GITHUB_WORKSPACE/src-tauri/target" -path "*/bundle/*" -type f 2>/dev/null || echo "No bundle dir"
+          echo ""
+          echo "=== find installer files ==="
+          find "$GITHUB_WORKSPACE/src-tauri/target" -type f \( -name "*.dmg" -o -name "*.deb" -o -name "*.AppImage" -o -name "*.msi" -o -name "*.exe" -o -name "*.app.tar.gz" \) 2>/dev/null || echo "None found"
 
-      # Collect artifacts using tauri-action output
-      - name: Collect artifacts
+      - name: Collect artifacts (macOS)
+        if: matrix.platform == 'macos'
         shell: bash
         run: |
-          mkdir -p artifacts
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
+          find "$GITHUB_WORKSPACE/src-tauri/target" -name "*.dmg" ! -name "rw.*" -exec cp {} "$GITHUB_WORKSPACE/artifacts/" \;
+          ls -lh "$GITHUB_WORKSPACE/artifacts/"
 
-          # Method 1: Use tauri-action output
-          ARTIFACT_PATHS='${{ steps.tauri-build.outputs.artifactPaths }}'
-          if [ -n "$ARTIFACT_PATHS" ] && [ "$ARTIFACT_PATHS" != "" ]; then
-            echo "Using tauri-action artifactPaths..."
-            echo "$ARTIFACT_PATHS" | tr -d '[]"' | tr ',' '\n' | while read -r filepath; do
-              filepath=$(echo "$filepath" | xargs)  # trim whitespace
-              if [ -n "$filepath" ] && [ -f "$filepath" ]; then
-                echo "Copying: $filepath"
-                cp "$filepath" artifacts/
-              fi
-            done
-          fi
+      - name: Collect artifacts (Windows)
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
+          find "$GITHUB_WORKSPACE/src-tauri/target" -path "*/bundle/msi/*.msi" -exec cp {} "$GITHUB_WORKSPACE/artifacts/" \; 2>/dev/null || true
+          find "$GITHUB_WORKSPACE/src-tauri/target" -path "*/bundle/nsis/*.exe" -exec cp {} "$GITHUB_WORKSPACE/artifacts/" \; 2>/dev/null || true
+          ls -lh "$GITHUB_WORKSPACE/artifacts/"
 
-          # Method 2: Fallback - find bundle files
-          if [ -z "$(ls -A artifacts 2>/dev/null)" ]; then
-            echo "Fallback: searching for bundle files..."
-            find src-tauri/target -path "*/bundle/dmg/*.dmg" -exec cp {} artifacts/ \; 2>/dev/null || true
-            find src-tauri/target -path "*/bundle/deb/*.deb" -exec cp {} artifacts/ \; 2>/dev/null || true
-            find src-tauri/target -path "*/bundle/appimage/*.AppImage" -exec cp {} artifacts/ \; 2>/dev/null || true
-            find src-tauri/target -path "*/bundle/msi/*.msi" -exec cp {} artifacts/ \; 2>/dev/null || true
-            find src-tauri/target -path "*/bundle/nsis/*.exe" -exec cp {} artifacts/ \; 2>/dev/null || true
-            find src-tauri/target -path "*/bundle/macos/*.app.tar.gz" -exec cp {} artifacts/ \; 2>/dev/null || true
-          fi
-
-          echo "=== Collected artifacts ==="
-          ls -lhR artifacts/ 2>/dev/null || echo "No artifacts collected"
+      - name: Collect artifacts (Linux)
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
+          find "$GITHUB_WORKSPACE/src-tauri/target" -name "*.deb" -exec cp {} "$GITHUB_WORKSPACE/artifacts/" \; 2>/dev/null || true
+          find "$GITHUB_WORKSPACE/src-tauri/target" -name "*.AppImage" -exec cp {} "$GITHUB_WORKSPACE/artifacts/" \; 2>/dev/null || true
+          ls -lh "$GITHUB_WORKSPACE/artifacts/"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: build-${{ matrix.label }}
-          path: artifacts/
+          path: ${{ github.workspace }}/artifacts/
           retention-days: 30
           if-no-files-found: warn
 
