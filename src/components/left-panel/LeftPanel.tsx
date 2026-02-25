@@ -3,7 +3,7 @@ import { FolderOpen, Pencil, Plus, RefreshCw, Trash2, Check, X } from "lucide-re
 import { useProjectStore } from "../../stores/projectStore";
 import { useFileStore } from "../../stores/fileStore";
 import { useI18n } from "../../lib/i18n";
-import { ConfirmDialog } from "../common/ConfirmDialog";
+import { useConfirm } from "../common/ConfirmDialog";
 import { FileTree } from "./FileTree";
 import { FileSearchPanel } from "./FileSearchPanel";
 
@@ -13,15 +13,13 @@ export function LeftPanel() {
     useProjectStore();
   const { loadTree, refreshExpanded } = useFileStore();
   const { t } = useI18n();
+  const { confirm } = useConfirm();
   const lastRefreshRef = useRef(0);
 
   // Rename state
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const renameInputRef = useRef<HTMLInputElement>(null);
-
-  // Delete confirm state
-  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Sort projects: active first, then by last_opened desc
   const sortedProjects = useMemo(() => {
@@ -76,13 +74,14 @@ export function LeftPanel() {
     setRenamingId(null);
   };
 
-  const handleDelete = async () => {
-    if (!deletingId) return;
-    await deleteProject(deletingId);
-    setDeletingId(null);
+  const handleDelete = async (projId: string, projName: string) => {
+    const ok = await confirm({
+      title: t("fileTree.delete"),
+      message: t("fileTree.deleteConfirm").replace("{name}", projName),
+      confirmLabel: t("confirm.delete"),
+    });
+    if (ok) await deleteProject(projId);
   };
-
-  const deletingProject = projects.find((p) => p.id === deletingId);
 
   return (
     <div className="panel panel--left">
@@ -184,7 +183,7 @@ export function LeftPanel() {
                       </button>
                       <button
                         className="project-item__action project-item__action--danger"
-                        onClick={(e) => { e.stopPropagation(); setDeletingId(proj.id); }}
+                        onClick={(e) => { e.stopPropagation(); handleDelete(proj.id, proj.name); }}
                         title={t("fileTree.delete")}
                       >
                         <Trash2 size={12} />
@@ -206,14 +205,6 @@ export function LeftPanel() {
         )}
       </div>
 
-      {deletingId && deletingProject && (
-        <ConfirmDialog
-          title={t("fileTree.delete")}
-          message={t("fileTree.deleteConfirm").replace("{name}", deletingProject.name)}
-          onConfirm={handleDelete}
-          onCancel={() => setDeletingId(null)}
-        />
-      )}
     </div>
   );
 }

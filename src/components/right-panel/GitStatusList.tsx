@@ -1,9 +1,9 @@
 import { useState, useMemo } from "react";
 import { CheckCircle2, Circle, Plus, Minus, Undo2 } from "lucide-react";
-import { ask } from "@tauri-apps/plugin-dialog";
 import { useGitStore } from "../../stores/gitStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useI18n } from "../../lib/i18n";
+import { useConfirm } from "../common/ConfirmDialog";
 
 const VISIBLE_LIMIT = 100;
 const MAX_STATUS_ENTRIES = 500;
@@ -12,6 +12,7 @@ export function GitStatusList() {
   const { fileStatuses, selectedFile, selectFile, stageFile, unstageFile, stageAll, unstageAll, discardFile } = useGitStore();
   const { activeProject } = useProjectStore();
   const { t } = useI18n();
+  const { confirm } = useConfirm();
 
   const [expandedStaged, setExpandedStaged] = useState(false);
   const [expandedUnstaged, setExpandedUnstaged] = useState(false);
@@ -45,7 +46,7 @@ export function GitStatusList() {
   const handleDiscard = async (e: React.MouseEvent, filePath: string) => {
     e.stopPropagation();
     if (!activeProject) return;
-    if (!(await ask(t("git.discardConfirm"), { title: t("git.discard"), kind: "warning" }))) return;
+    if (!(await confirm({ title: t("git.discard"), message: t("git.discardConfirm"), confirmLabel: t("confirm.delete") }))) return;
     discardFile(activeProject.path, filePath);
   };
 

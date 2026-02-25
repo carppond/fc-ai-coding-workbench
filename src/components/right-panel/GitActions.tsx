@@ -1,10 +1,10 @@
 import { useEffect, useRef } from "react";
 import { Loader2 } from "lucide-react";
-import { ask } from "@tauri-apps/plugin-dialog";
 import { useGitStore } from "../../stores/gitStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useI18n } from "../../lib/i18n";
 import { useToast } from "../common/Toast";
+import { useConfirm } from "../common/ConfirmDialog";
 
 export function GitActions() {
   const { commitMessage, setCommitMessage, commit, pull, push, operating, operationType, error, clearError, fileStatuses } =
@@ -12,6 +12,7 @@ export function GitActions() {
   const { activeProject } = useProjectStore();
   const { t } = useI18n();
   const { toast } = useToast();
+  const { confirm } = useConfirm();
   const prevErrorRef = useRef<string | null>(null);
 
   const hasStagedFiles = fileStatuses.some((f) => f.staged);
@@ -38,7 +39,7 @@ export function GitActions() {
     const msg = hasUncommitted
       ? t("git.pullConfirmDirty")
       : t("git.pullConfirm");
-    if (!(await ask(msg, { title: t("git.pull"), kind: "warning" }))) return;
+    if (!(await confirm({ title: t("git.pull"), message: msg }))) return;
     const ok = await pull(activeProject.path);
     if (ok) toast(t("git.pullSuccess"), "success");
   };
@@ -48,7 +49,7 @@ export function GitActions() {
     const msg = hasUncommitted
       ? t("git.pushConfirmDirty")
       : t("git.pushConfirm");
-    if (!(await ask(msg, { title: t("git.push"), kind: "warning" }))) return;
+    if (!(await confirm({ title: t("git.push"), message: msg }))) return;
     const ok = await push(activeProject.path);
     if (ok) toast(t("git.pushSuccess"), "success");
   };

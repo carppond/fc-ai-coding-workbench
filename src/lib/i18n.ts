@@ -169,6 +169,7 @@ const translations: Record<Locale, Record<string, string>> = {
 
     // ConfirmDialog
     "confirm.cancel": "取消",
+    "confirm.ok": "确定",
     "confirm.delete": "删除",
 
     // SearchResults
@@ -358,6 +359,7 @@ const translations: Record<Locale, Record<string, string>> = {
 
     // ConfirmDialog
     "confirm.cancel": "Cancel",
+    "confirm.ok": "OK",
     "confirm.delete": "Delete",
 
     // SearchResults

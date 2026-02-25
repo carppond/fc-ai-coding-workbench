@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
-import { ask } from "@tauri-apps/plugin-dialog";
 import { useSettingsStore, type Theme } from "../../stores/settingsStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useI18n } from "../../lib/i18n";
+import { useConfirm } from "../common/ConfirmDialog";
 import * as ipc from "../../ipc/commands";
 import type { EnvCheckResult } from "../../ipc/commands";
 import { EnvironmentSetup } from "../common/EnvironmentSetup";
@@ -34,6 +34,7 @@ export function SetupWizard() {
   const { theme, setTheme, setOnboardingComplete } = useSettingsStore();
   const { activeProject, openProject } = useProjectStore();
   const { t } = useI18n();
+  const { confirm } = useConfirm();
 
   // Preload environment detection on wizard mount (background)
   const [preloadedEnv, setPreloadedEnv] = useState<EnvCheckResult | null>(null);
@@ -90,7 +91,7 @@ export function SetupWizard() {
     const msg = t("wizard.writeConfirm")
       .replace("{path}", shellConfigPath)
       .replace("{content}", content);
-    if (!(await ask(msg, { title: t("wizard.apiConfig"), kind: "info" }))) return;
+    if (!(await confirm({ title: t("wizard.apiConfig"), message: msg }))) return;
 
     try {
       const path = await ipc.writeEnvToShell(

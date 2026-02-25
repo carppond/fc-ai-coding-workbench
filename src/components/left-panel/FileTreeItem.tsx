@@ -1,9 +1,9 @@
 import { useEffect, useState, useRef } from "react";
 import { ChevronRight, ChevronDown, Folder, FileText, Loader } from "lucide-react";
-import { ask } from "@tauri-apps/plugin-dialog";
 import type { DirEntry } from "../../lib/types";
 import { useFileStore } from "../../stores/fileStore";
 import { useI18n } from "../../lib/i18n";
+import { useConfirm } from "../common/ConfirmDialog";
 import * as ipc from "../../ipc/commands";
 
 interface FileTreeItemProps {
@@ -24,6 +24,7 @@ let globalCloseMenu: (() => void) | null = null;
 export function FileTreeItem({ entry, depth, defaultExpanded }: FileTreeItemProps) {
   const { expandedPaths, toggleExpand, loadingPaths, openFile, refreshParent } = useFileStore();
   const { t } = useI18n();
+  const { confirm } = useConfirm();
   const isExpanded = expandedPaths.has(entry.path);
   const isLoading = loadingPaths.has(entry.path);
   const isDir = entry.is_dir;
@@ -123,7 +124,7 @@ export function FileTreeItem({ entry, depth, defaultExpanded }: FileTreeItemProp
   const handleDelete = async () => {
     setContextMenu(null);
     const msg = t("fileTree.deleteConfirm").replace("{name}", entry.name);
-    if (!(await ask(msg, { title: t("fileTree.delete"), kind: "warning" }))) return;
+    if (!(await confirm({ title: t("fileTree.delete"), message: msg, confirmLabel: t("confirm.delete") }))) return;
     try {
       await ipc.deleteEntry(entry.path);
       const parent = getParentPath(entry.path);
