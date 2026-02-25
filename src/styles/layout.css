@@ -1750,14 +1750,15 @@
 
 .confirm-dialog__header {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   margin-bottom: 14px;
 }
 
 .confirm-dialog__icon {
-  width: 40px;
-  height: 40px;
+  width: 56px;
+  height: 56px;
   border-radius: var(--radius);
   flex-shrink: 0;
 }
@@ -1774,12 +1775,21 @@
   margin-bottom: 24px;
   line-height: 1.6;
   white-space: pre-line;
+  text-align: center;
 }
 
 .confirm-dialog__actions {
   display: flex;
   gap: 10px;
-  justify-content: flex-end;
+  justify-content: space-evenly;
+}
+
+.confirm-dialog__actions .btn {
+  flex: 1;
+}
+
+.confirm-dialog__actions .btn--ghost {
+  background: var(--bg-hover);
 }
 
 /* ========================================

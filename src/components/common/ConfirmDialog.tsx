@@ -8,11 +8,14 @@ interface ConfirmOptions {
   message: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  extraLabel?: string;
   kind?: "info" | "warning";
 }
 
+type ConfirmResult = boolean | "extra";
+
 interface ConfirmContextValue {
-  confirm: (opts: ConfirmOptions) => Promise<boolean>;
+  confirm: (opts: ConfirmOptions) => Promise<ConfirmResult>;
 }
 
 const ConfirmContext = createContext<ConfirmContextValue>({
@@ -26,10 +29,10 @@ export function useConfirm() {
 export function ConfirmProvider({ children }: { children: ReactNode }) {
   const { t } = useI18n();
   const [state, setState] = useState<ConfirmOptions | null>(null);
-  const resolveRef = useRef<((v: boolean) => void) | null>(null);
+  const resolveRef = useRef<((v: ConfirmResult) => void) | null>(null);
 
   const confirm = useCallback((opts: ConfirmOptions) => {
-    return new Promise<boolean>((resolve) => {
+    return new Promise<ConfirmResult>((resolve) => {
       resolveRef.current = resolve;
       setState(opts);
     });
@@ -37,6 +40,12 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
 
   const handleConfirm = () => {
     resolveRef.current?.(true);
+    resolveRef.current = null;
+    setState(null);
+  };
+
+  const handleExtra = () => {
+    resolveRef.current?.("extra");
     resolveRef.current = null;
     setState(null);
   };
@@ -64,6 +73,11 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
               <button className="btn btn--ghost" onClick={handleCancel}>
                 {state.cancelLabel || t("confirm.cancel")}
               </button>
+              {state.extraLabel && (
+                <button className="btn btn--ghost" onClick={handleExtra}>
+                  {state.extraLabel}
+                </button>
+              )}
               <button className="btn btn--primary" onClick={handleConfirm}>
                 {state.confirmLabel || t("confirm.ok")}
               </button>

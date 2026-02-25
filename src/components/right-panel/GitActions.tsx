@@ -28,8 +28,21 @@ export function GitActions() {
 
   const handleCommit = async () => {
     if (!activeProject) return;
+    const result = await confirm({
+      title: t("git.commit"),
+      message: t("git.commitConfirm"),
+      confirmLabel: t("git.commitAndPush"),
+      extraLabel: t("git.commitOnly"),
+    });
+    if (!result) return;
     const ok = await commit(activeProject.path);
-    if (ok) toast(t("git.commitSuccess"), "success");
+    if (!ok) return;
+    toast(t("git.commitSuccess"), "success");
+    if (result === true) {
+      // "提交并推送"
+      const pushOk = await push(activeProject.path);
+      if (pushOk) toast(t("git.pushSuccess"), "success");
+    }
   };
 
   const hasUncommitted = fileStatuses.length > 0;
