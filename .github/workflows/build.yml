@@ -18,7 +18,7 @@ jobs:
             label: macOS-universal
           - platform: windows
             os: windows-latest
-            args: --bundles msi,nsis
+            args: --bundles nsis
             label: Windows-x64
           - platform: linux
             os: ubuntu-22.04
@@ -101,8 +101,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p "$GITHUB_WORKSPACE/artifacts"
-          find "$GITHUB_WORKSPACE/src-tauri/target" -path "*/bundle/msi/*.msi" -exec cp {} "$GITHUB_WORKSPACE/artifacts/" \; 2>/dev/null || true
-          find "$GITHUB_WORKSPACE/src-tauri/target" -path "*/bundle/nsis/*.exe" -exec cp {} "$GITHUB_WORKSPACE/artifacts/" \; 2>/dev/null || true
+          find "$GITHUB_WORKSPACE/src-tauri/target" -path "*/bundle/nsis/*" -name "*.exe" -exec cp {} "$GITHUB_WORKSPACE/artifacts/" \;
           ls -lh "$GITHUB_WORKSPACE/artifacts/"
 
       - name: Collect artifacts (Linux)
