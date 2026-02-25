@@ -504,58 +504,82 @@ fn current_branch_name(project_path: &str) -> Option<String> {
     head.shorthand().map(|s| s.to_string())
 }
 
-pub async fn pull(project_path: &str) -> AppResult<String> {
+/// Check whether the current branch has an upstream tracking branch configured
+fn has_upstream(project_path: &str) -> bool {
+    let repo = match Repository::open(project_path) {
+        Ok(r) => r,
+        Err(_) => return false,
+    };
+    let head = match repo.head() {
+        Ok(h) => h,
+        Err(_) => return false,
+    };
+    let name = match head.shorthand() {
+        Some(n) => n.to_string(),
+        None => return false,
+    };
+    let result = match repo.find_branch(&name, git2::BranchType::Local) {
+        Ok(branch) => branch.upstream().is_ok(),
+        Err(_) => false,
+    };
+    result
+}
+
+/// Run a git command with timeout and return (success, stdout, stderr)
+async fn run_git(
+    project_path: &str,
+    args: &[&str],
+) -> AppResult<(bool, String, String)> {
     let child = tokio::process::Command::new("git")
-        .arg("pull")
+        .args(args)
         .current_dir(project_path)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()?;
     let output = tokio::time::timeout(GIT_REMOTE_TIMEOUT, child.wait_with_output())
         .await
-        .map_err(|_| AppError::General("git pull timed out (30s)".to_string()))??;
+        .map_err(|_| {
+            AppError::General(format!("git {} timed out (30s)", args.first().unwrap_or(&"")))
+        })??;
+    Ok((
+        output.status.success(),
+        String::from_utf8_lossy(&output.stdout).to_string(),
+        String::from_utf8_lossy(&output.stderr).to_string(),
+    ))
+}
 
-    if output.status.success() {
-        return Ok(String::from_utf8_lossy(&output.stdout).to_string());
-    }
-
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-    // No tracking branch — auto-detect and retry
-    if stderr.contains("no tracking information") || stderr.contains("No tracking information") {
-        if let Some(branch) = detect_remote_branch(project_path).await {
-            let retry = tokio::process::Command::new("git")
-                .args(["pull", "origin", &branch, "--allow-unrelated-histories"])
-                .current_dir(project_path)
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .spawn()?;
-            let retry_out = tokio::time::timeout(GIT_REMOTE_TIMEOUT, retry.wait_with_output())
-                .await
-                .map_err(|_| AppError::General("git pull timed out (30s)".to_string()))??;
-
-            if retry_out.status.success() {
-                // Set tracking for future pulls
-                let _ = tokio::process::Command::new("git")
-                    .args([
-                        "branch",
-                        "--set-upstream-to",
-                        &format!("origin/{}", branch),
-                    ])
-                    .current_dir(project_path)
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .output()
-                    .await;
-                return Ok(String::from_utf8_lossy(&retry_out.stdout).to_string());
-            }
-            return Err(AppError::General(
-                String::from_utf8_lossy(&retry_out.stderr).to_string(),
-            ));
+pub async fn pull(project_path: &str) -> AppResult<String> {
+    if has_upstream(project_path) {
+        // Normal pull — upstream is configured
+        let (ok, stdout, stderr) = run_git(project_path, &["pull"]).await?;
+        if ok {
+            return Ok(stdout);
         }
+        return Err(AppError::General(stderr));
     }
 
-    Err(AppError::General(stderr))
+    // No upstream — detect remote branch and pull explicitly
+    if let Some(branch) = detect_remote_branch(project_path).await {
+        let (ok, stdout, stderr) = run_git(
+            project_path,
+            &["pull", "origin", &branch, "--allow-unrelated-histories"],
+        )
+        .await?;
+        if ok {
+            // Set tracking for future pulls
+            let _ = run_git(
+                project_path,
+                &["branch", "--set-upstream-to", &format!("origin/{}", branch)],
+            )
+            .await;
+            return Ok(stdout);
+        }
+        return Err(AppError::General(stderr));
+    }
+
+    Err(AppError::General(
+        "No remote branch found (origin is empty). Push first to create a remote branch.".into(),
+    ))
 }
 
 pub async fn init_repo(project_path: &str, remote_url: Option<&str>) -> AppResult<()> {
@@ -624,43 +648,21 @@ pub async fn init_repo(project_path: &str, remote_url: Option<&str>) -> AppResul
 }
 
 pub async fn push(project_path: &str) -> AppResult<String> {
-    let child = tokio::process::Command::new("git")
-        .arg("push")
-        .current_dir(project_path)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()?;
-    let output = tokio::time::timeout(GIT_REMOTE_TIMEOUT, child.wait_with_output())
-        .await
-        .map_err(|_| AppError::General("git push timed out (30s)".to_string()))??;
-
-    if output.status.success() {
-        return Ok(String::from_utf8_lossy(&output.stdout).to_string());
-    }
-
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-    // No upstream branch — push with -u to set tracking
-    if stderr.contains("no upstream branch") || stderr.contains("has no upstream branch") {
-        if let Some(branch) = current_branch_name(project_path) {
-            let retry = tokio::process::Command::new("git")
-                .args(["push", "-u", "origin", &branch])
-                .current_dir(project_path)
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .spawn()?;
-            let retry_out = tokio::time::timeout(GIT_REMOTE_TIMEOUT, retry.wait_with_output())
-                .await
-                .map_err(|_| AppError::General("git push timed out (30s)".to_string()))??;
-
-            if retry_out.status.success() {
-                return Ok(String::from_utf8_lossy(&retry_out.stdout).to_string());
-            }
-            return Err(AppError::General(
-                String::from_utf8_lossy(&retry_out.stderr).to_string(),
-            ));
+    if has_upstream(project_path) {
+        // Normal push — upstream is configured
+        let (ok, stdout, stderr) = run_git(project_path, &["push"]).await?;
+        if ok {
+            return Ok(stdout);
         }
+        return Err(AppError::General(stderr));
     }
 
+    // No upstream — push with -u to create remote branch and set tracking
+    let branch = current_branch_name(project_path).unwrap_or_else(|| "main".to_string());
+    let (ok, stdout, stderr) =
+        run_git(project_path, &["push", "-u", "origin", &branch]).await?;
+    if ok {
+        return Ok(stdout);
+    }
     Err(AppError::General(stderr))
 }
