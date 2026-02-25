@@ -65,38 +65,34 @@ jobs:
         run: npm ci
 
       - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tauriScript: npx tauri
-          args: --target ${{ matrix.target }}
+        run: npx tauri build --target ${{ matrix.target }}
 
-      # Collect artifacts to a known directory
-      - name: Collect artifacts (Unix)
-        if: matrix.platform != 'windows'
+      # Debug: list all bundle files
+      - name: List bundle output
+        if: always()
+        shell: bash
+        run: |
+          echo "=== Searching for bundle files ==="
+          find src-tauri/target -path "*/bundle/*" -type f 2>/dev/null || echo "No bundle dir found"
+          echo "=== Searching for installer files ==="
+          find src-tauri/target -type f \( -name "*.dmg" -o -name "*.deb" -o -name "*.AppImage" -o -name "*.msi" -o -name "*.exe" -o -name "*.app.tar.gz" \) 2>/dev/null || echo "No installer files found"
+
+      # Collect artifacts
+      - name: Collect artifacts
+        shell: bash
         run: |
           mkdir -p artifacts
-          find src-tauri/target -type f \( -name "*.dmg" -o -name "*.deb" -o -name "*.AppImage" -o -name "*.app.tar.gz" \) ! -name "rw.*" | while read f; do
-            cp "$f" artifacts/
-          done
-          ls -la artifacts/ || echo "No artifacts found"
-
-      - name: Collect artifacts (Windows)
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path artifacts
-          Get-ChildItem -Path src-tauri/target -Recurse -Include *.msi,*.exe -File | Where-Object { $_.DirectoryName -match 'bundle' } | ForEach-Object {
-            Copy-Item $_.FullName -Destination artifacts/
-          }
-          Get-ChildItem artifacts/ -ErrorAction SilentlyContinue
+          find src-tauri/target -path "*/bundle/*" -type f \( -name "*.dmg" -o -name "*.deb" -o -name "*.AppImage" -o -name "*.msi" -o -name "*.app.tar.gz" \) ! -name "rw.*" -exec cp {} artifacts/ \;
+          # Windows: also grab NSIS exe (inside bundle/nsis/)
+          find src-tauri/target -path "*/bundle/nsis/*" -type f -name "*.exe" -exec cp {} artifacts/ \; 2>/dev/null || true
+          echo "=== Collected artifacts ==="
+          ls -la artifacts/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: build-${{ matrix.label }}
-          path: artifacts/*
+          path: artifacts/
           retention-days: 30
           if-no-files-found: warn
 
