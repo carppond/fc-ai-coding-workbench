@@ -14,15 +14,15 @@ jobs:
         include:
           - platform: macos
             os: macos-latest
-            args: --target universal-apple-darwin
+            args: --target universal-apple-darwin --bundles dmg
             label: macOS-universal
           - platform: windows
             os: windows-latest
-            args: ""
+            args: --bundles msi,nsis
             label: Windows-x64
           - platform: linux
             os: ubuntu-22.04
-            args: ""
+            args: --bundles deb,appimage
             label: Linux-x64
 
     runs-on: ${{ matrix.os }}
