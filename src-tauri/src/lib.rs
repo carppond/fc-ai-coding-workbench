@@ -4,6 +4,7 @@ mod errors;
 mod git;
 mod keychain;
 mod providers;
+pub mod proxy;
 mod state;
 mod terminal;
 
@@ -56,6 +57,8 @@ pub fn run() {
             commands::db_commands::search_messages,
             commands::db_commands::get_setting,
             commands::db_commands::set_setting,
+            commands::db_commands::set_proxy,
+            commands::db_commands::get_proxy,
             // Keychain commands
             commands::keychain_commands::set_api_key,
             commands::keychain_commands::has_api_key,

@@ -105,7 +105,15 @@ pub fn user_shell_path() -> &'static str {
     })
 }
 
+/// Extract a semver-like version string (e.g. "2.1.55") from text like "2.1.55 (Claude Code)"
+fn extract_semver(s: &str) -> &str {
+    // Take the first whitespace-delimited token, strip leading 'v'
+    let token = s.split_whitespace().next().unwrap_or("");
+    token.strip_prefix('v').unwrap_or(token)
+}
+
 /// Run a command with the user's full PATH and return trimmed stdout, or None if it fails.
+/// This is used for local version checks (node --version, etc.) — no proxy needed.
 fn run_version_cmd(program: &str, args: &[&str]) -> Option<String> {
     Command::new(program)
         .args(args)
@@ -121,7 +129,7 @@ fn run_version_cmd(program: &str, args: &[&str]) -> Option<String> {
         })
 }
 
-/// Check if a global npm package is installed.
+/// Check if a global npm package is installed (local check, no proxy needed).
 fn is_npm_global(package: &str) -> bool {
     Command::new("npm")
         .args(["list", "-g", package, "--depth=0"])
@@ -133,7 +141,7 @@ fn is_npm_global(package: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Check if a brew formula is installed (macOS only).
+/// Check if a brew formula is installed (macOS only, local check, no proxy needed).
 fn is_brew_installed(formula: &str) -> bool {
     Command::new("brew")
         .args(["list", formula])
@@ -198,11 +206,11 @@ pub fn check_environment() -> AppResult<EnvCheckResult> {
     };
 
     // Compare installed vs latest version
+    // claude --version returns e.g. "2.1.55 (Claude Code)", npm view returns "2.1.55"
     let claude_update_available = match (&claude_version, &claude_latest_version) {
         (Some(installed), Some(latest)) => {
-            // installed might be "1.0.25" or "claude 1.0.25" — extract the version part
-            let cur = installed.split_whitespace().last().unwrap_or("");
-            let lat = latest.split_whitespace().last().unwrap_or("");
+            let cur = extract_semver(installed);
+            let lat = extract_semver(latest);
             !cur.is_empty() && !lat.is_empty() && cur != lat
         }
         _ => false,
@@ -267,11 +275,15 @@ pub async fn run_install_command(
     let display_cmd = format!("$ {} {}", program, args.join(" "));
     let _ = app.emit("install-output", InstallOutput { line: display_cmd });
 
-    let mut child = Command::new(program)
-        .args(&args)
+    let mut cmd = Command::new(program);
+    cmd.args(&args)
         .env("PATH", user_shell_path())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (k, v) in crate::proxy::env_pairs() {
+        cmd.env(k, v);
+    }
+    let mut child = cmd
         .spawn()
         .map_err(|e| AppError::General(format!("Failed to spawn {}: {}", program, e)))?;
 

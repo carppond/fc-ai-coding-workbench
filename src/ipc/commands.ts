@@ -123,6 +123,14 @@ export const getSetting = (key: string) =>
 export const setSetting = (key: string, value: unknown) =>
   invoke<void>("set_setting", { key, value });
 
+// --- Proxy ---
+
+export const setProxy = (url: string) =>
+  invoke<void>("set_proxy", { url });
+
+export const getProxy = () =>
+  invoke<string | null>("get_proxy");
+
 // --- Keychain ---
 
 export const setApiKey = (provider: string, apiKey: string) =>

@@ -11,7 +11,7 @@ import { useProjectStore } from "../../stores/projectStore";
 import { useI18n } from "../../lib/i18n";
 
 export function AppShell() {
-  const { onboardingComplete, loadSettings, loading } = useSettingsStore();
+  const { onboardingComplete, loadSettings, loading, preloadEnvCheck } = useSettingsStore();
   const { loadProjects } = useProjectStore();
   const { t, loadLocale } = useI18n();
 
@@ -19,7 +19,8 @@ export function AppShell() {
     loadSettings();
     loadProjects();
     loadLocale();
-  }, [loadSettings, loadProjects, loadLocale]);
+    preloadEnvCheck();
+  }, [loadSettings, loadProjects, loadLocale, preloadEnvCheck]);
 
   if (loading) {
     return (

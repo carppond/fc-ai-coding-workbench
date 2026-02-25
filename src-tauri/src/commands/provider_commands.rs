@@ -23,7 +23,7 @@ pub async fn send_message(
         tokens.insert(thread_id.clone(), tx);
     }
 
-    let client = state.http_client.clone();
+    let client = state.http_client.read().unwrap().clone();
 
     // Route to the correct provider adapter
     match provider.as_str() {
@@ -68,7 +68,7 @@ pub async fn test_api_key(
     api_key: String,
     base_url: Option<String>,
 ) -> AppResult<bool> {
-    let client = state.http_client.clone();
+    let client = state.http_client.read().unwrap().clone();
     match provider.as_str() {
         "anthropic" => {
             providers::anthropic::test_connection(&client, &api_key).await

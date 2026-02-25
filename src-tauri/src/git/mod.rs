@@ -523,13 +523,16 @@ async fn run_git(
     project_path: &str,
     args: &[&str],
 ) -> AppResult<(bool, String, String)> {
-    let child = tokio::process::Command::new("git")
-        .args(args)
+    let mut cmd = tokio::process::Command::new("git");
+    cmd.args(args)
         .current_dir(project_path)
         .env("PATH", crate::commands::setup_commands::user_shell_path())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()?;
+        .stderr(std::process::Stdio::piped());
+    for (k, v) in crate::proxy::env_pairs() {
+        cmd.env(k, v);
+    }
+    let child = cmd.spawn()?;
     let output = tokio::time::timeout(GIT_REMOTE_TIMEOUT, child.wait_with_output())
         .await
         .map_err(|_| {

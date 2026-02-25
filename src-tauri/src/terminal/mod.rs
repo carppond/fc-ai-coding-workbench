@@ -109,6 +109,10 @@ impl TerminalSession {
         for (key, val) in std::env::vars() {
             cmd.env(key, val);
         }
+        // Inject proxy environment variables (overrides inherited values)
+        for (key, val) in crate::proxy::env_pairs() {
+            cmd.env(key, val);
+        }
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "ShiGuang");

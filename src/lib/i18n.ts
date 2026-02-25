@@ -163,6 +163,18 @@ const translations: Record<Locale, Record<string, string>> = {
     "settings.setAsActive": "设为活跃",
     "settings.del": "删除",
 
+    // Proxy
+    "settings.proxy": "网络代理",
+    "proxy.url": "代理地址",
+    "proxy.urlPlaceholder": "http://127.0.0.1:7890",
+    "proxy.save": "保存",
+    "proxy.clear": "清除",
+    "proxy.saved": "代理已保存",
+    "proxy.cleared": "代理已清除",
+    "proxy.enabled": "已启用",
+    "proxy.disabled": "未启用",
+    "proxy.hint": "代理将应用于 Git、npm、终端及 API 请求。支持 HTTP/HTTPS/SOCKS5。",
+
     // SessionItem
     "session.deleteSession": "删除会话",
     "session.deleteConfirm": "删除 \"{title}\" 及其所有对话？",
@@ -352,6 +364,18 @@ const translations: Record<Locale, Record<string, string>> = {
     "settings.apiKeys": "API Keys",
     "settings.setAsActive": "Set as active",
     "settings.del": "Del",
+
+    // Proxy
+    "settings.proxy": "Network Proxy",
+    "proxy.url": "Proxy URL",
+    "proxy.urlPlaceholder": "http://127.0.0.1:7890",
+    "proxy.save": "Save",
+    "proxy.clear": "Clear",
+    "proxy.saved": "Proxy saved",
+    "proxy.cleared": "Proxy cleared",
+    "proxy.enabled": "Enabled",
+    "proxy.disabled": "Disabled",
+    "proxy.hint": "Proxy applies to Git, npm, terminal, and API requests. Supports HTTP/HTTPS/SOCKS5.",
 
     // SessionItem
     "session.deleteSession": "Delete Session",

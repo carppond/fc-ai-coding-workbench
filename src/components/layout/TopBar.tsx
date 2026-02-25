@@ -1,26 +1,107 @@
-import { useState, useEffect } from "react";
-import { FolderOpen, Globe, Palette, Settings, X } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { FolderOpen, Globe, Palette, Settings, X, Info } from "lucide-react";
 import { useProjectStore } from "../../stores/projectStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useI18n } from "../../lib/i18n";
 import { EnvironmentSetup } from "../common/EnvironmentSetup";
+import * as ipc from "../../ipc/commands";
+
+function ProxySettings() {
+  const { t } = useI18n();
+  const [proxyUrl, setProxyUrl] = useState("");
+  const [savedUrl, setSavedUrl] = useState("");
+  const [status, setStatus] = useState<"idle" | "saved" | "cleared">("idle");
+
+  useEffect(() => {
+    ipc.getProxy().then((url) => {
+      const val = url ?? "";
+      setProxyUrl(val);
+      setSavedUrl(val);
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (status !== "idle") {
+      const id = setTimeout(() => setStatus("idle"), 2000);
+      return () => clearTimeout(id);
+    }
+  }, [status]);
+
+  const handleSave = useCallback(async () => {
+    try {
+      await ipc.setProxy(proxyUrl.trim());
+      setSavedUrl(proxyUrl.trim());
+      setStatus("saved");
+    } catch {
+      // ignore
+    }
+  }, [proxyUrl]);
+
+  const handleClear = useCallback(async () => {
+    try {
+      await ipc.setProxy("");
+      setProxyUrl("");
+      setSavedUrl("");
+      setStatus("cleared");
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const isDirty = proxyUrl.trim() !== savedUrl;
+
+  const isActive = savedUrl.length > 0;
+
+  return (
+    <div className="proxy-settings">
+      <div className="proxy-settings__status-row">
+        <label className="proxy-settings__label">{t("proxy.url")}</label>
+        <span className={`proxy-settings__badge ${isActive ? "proxy-settings__badge--on" : "proxy-settings__badge--off"}`}>
+          {isActive ? t("proxy.enabled") : t("proxy.disabled")}
+        </span>
+      </div>
+      <div className="proxy-settings__row">
+        <input
+          type="text"
+          className="proxy-settings__input"
+          placeholder={t("proxy.urlPlaceholder")}
+          value={proxyUrl}
+          onChange={(e) => setProxyUrl(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && isDirty) handleSave(); }}
+        />
+        <button
+          className="btn btn--primary btn--sm"
+          onClick={handleSave}
+          disabled={!isDirty && proxyUrl.trim().length === 0}
+        >
+          {t("proxy.save")}
+        </button>
+        <button
+          className="btn btn--ghost btn--sm"
+          onClick={handleClear}
+          disabled={!savedUrl && !proxyUrl.trim()}
+        >
+          {t("proxy.clear")}
+        </button>
+      </div>
+      {status !== "idle" && (
+        <div className="proxy-settings__status">
+          {status === "saved" ? t("proxy.saved") : t("proxy.cleared")}
+        </div>
+      )}
+      <div className="proxy-settings__hint">
+        <Info size={12} />
+        <span>{t("proxy.hint")}</span>
+      </div>
+    </div>
+  );
+}
 
 export function TopBar() {
   const { openProject } = useProjectStore();
-  const { loading, theme, cycleTheme } = useSettingsStore();
+  const { loading, theme, cycleTheme, envCache } = useSettingsStore();
   const { t, toggleLocale, locale } = useI18n();
   const [showSettings, setShowSettings] = useState(false);
-  // Delay mounting EnvironmentSetup so the dialog renders first
-  const [mountEnv, setMountEnv] = useState(false);
-
-  useEffect(() => {
-    if (showSettings) {
-      setMountEnv(false);
-      // setTimeout ensures the dialog paints first, then mount the heavy component
-      const id = setTimeout(() => setMountEnv(true), 50);
-      return () => clearTimeout(id);
-    }
-  }, [showSettings]);
 
   if (loading) return null;
 
@@ -83,9 +164,15 @@ export function TopBar() {
             <div className="settings-dialog__body">
               <div className="settings-dialog__section">
                 <div className="settings-dialog__section-title">
+                  {t("settings.proxy")}
+                </div>
+                <ProxySettings />
+              </div>
+              <div className="settings-dialog__section">
+                <div className="settings-dialog__section-title">
                   {t("settings.environment")}
                 </div>
-                {mountEnv ? <EnvironmentSetup compact /> : <EnvironmentSetup.Skeleton />}
+                <EnvironmentSetup compact preloadedEnv={envCache} />
               </div>
             </div>
           </div>

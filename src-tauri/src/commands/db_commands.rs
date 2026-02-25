@@ -1,5 +1,6 @@
 use crate::db;
 use crate::errors::{AppError, AppResult};
+use crate::proxy;
 use crate::state::AppState;
 use tauri::State;
 
@@ -196,4 +197,33 @@ pub fn get_setting(state: State<AppState>, key: String) -> AppResult<Option<serd
 pub fn set_setting(state: State<AppState>, key: String, value: serde_json::Value) -> AppResult<()> {
     let conn = lock_db(&state)?;
     db::settings::set_setting(&conn, &key, &value)
+}
+
+// --- Proxy ---
+
+#[tauri::command]
+pub fn set_proxy(state: State<AppState>, url: String) -> AppResult<()> {
+    // 1. Save to database
+    let conn = lock_db(&state)?;
+    let value = if url.trim().is_empty() {
+        serde_json::Value::String(String::new())
+    } else {
+        serde_json::Value::String(url.trim().to_string())
+    };
+    db::settings::set_setting(&conn, "proxy_url", &value)?;
+    drop(conn);
+
+    // 2. Update global proxy state
+    let clean_url = if url.trim().is_empty() { None } else { Some(url.trim().to_string()) };
+    proxy::set_url(clean_url);
+
+    // 3. Rebuild HTTP client with new proxy
+    state.rebuild_http_client()?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_proxy() -> AppResult<Option<String>> {
+    Ok(proxy::get_url())
 }

@@ -2322,6 +2322,99 @@
 }
 
 /* ========================================
+   Proxy Settings
+   ======================================== */
+.proxy-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.proxy-settings__status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.proxy-settings__label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.proxy-settings__badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 8px;
+  line-height: 1.6;
+  letter-spacing: 0.02em;
+}
+
+.proxy-settings__badge--on {
+  color: var(--success, #4ade80);
+  background: color-mix(in srgb, var(--success, #4ade80) 12%, transparent);
+}
+
+.proxy-settings__badge--off {
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-muted) 10%, transparent);
+}
+
+.proxy-settings__row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.proxy-settings__input {
+  flex: 1;
+  height: 30px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-family: var(--font-mono, "SF Mono", "Menlo", "Monaco", monospace);
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.proxy-settings__input:focus {
+  border-color: var(--accent);
+}
+
+.proxy-settings__input::placeholder {
+  color: var(--text-muted);
+}
+
+.proxy-settings__status {
+  font-size: 11px;
+  color: var(--success, #4ade80);
+  animation: proxy-status-in 0.2s ease;
+}
+
+@keyframes proxy-status-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.proxy-settings__hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.proxy-settings__hint svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* ========================================
    Allotment Overrides
    ======================================== */
 .split-view-view {

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { ProviderConfig } from "../lib/types";
 import { DEFAULT_PROVIDERS } from "../lib/types";
+import type { EnvCheckResult } from "../ipc/commands";
 import * as ipc from "../ipc/commands";
 
 export type Theme =
@@ -24,8 +25,11 @@ interface SettingsState {
   theme: Theme;
   onboardingComplete: boolean;
   loading: boolean;
+  envCache: EnvCheckResult | null;
 
   loadSettings: () => Promise<void>;
+  preloadEnvCheck: () => void;
+  refreshEnvCheck: () => Promise<void>;
   setActiveProvider: (provider: string) => Promise<void>;
   setActiveModel: (model: string) => Promise<void>;
   setActiveMode: (mode: string) => Promise<void>;
@@ -47,6 +51,22 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   theme: "mocha" as Theme,
   onboardingComplete: false,
   loading: true,
+  envCache: null,
+
+  preloadEnvCheck: () => {
+    ipc.checkEnvironment().then((result) => {
+      set({ envCache: result });
+    }).catch(() => {});
+  },
+
+  refreshEnvCheck: async () => {
+    try {
+      const result = await ipc.checkEnvironment();
+      set({ envCache: result });
+    } catch {
+      // ignore
+    }
+  },
 
   loadSettings: async () => {
     set({ loading: true });
