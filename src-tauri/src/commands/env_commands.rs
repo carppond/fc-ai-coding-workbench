@@ -150,7 +150,7 @@ fn claude_resume_function_bash() -> &'static str {
     script -q "$log" command claude "$@"
     local resume=$(grep -oE 'claude --resume [a-zA-Z0-9_-]+' "$log" | tail -1)
     if [[ -n "$resume" ]]; then
-        echo "$(date '+%Y-%m-%d %H:%M') | $resume" >> "$PWD/.claude_resumes.txt"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') | $resume" >> "$PWD/.claude_resumes.txt"
     fi
     rm -f "$log"
 }"#
