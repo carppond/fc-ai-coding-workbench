@@ -19,7 +19,9 @@ export function AppShell() {
     loadSettings();
     loadProjects();
     loadLocale();
-    preloadEnvCheck();
+    // Delay env check so it doesn't compete with critical startup rendering
+    const id = setTimeout(preloadEnvCheck, 3000);
+    return () => clearTimeout(id);
   }, [loadSettings, loadProjects, loadLocale, preloadEnvCheck]);
 
   if (loading) {
