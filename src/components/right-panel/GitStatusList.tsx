@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { CheckCircle2, Circle, Plus, Minus, Undo2 } from "lucide-react";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { useGitStore } from "../../stores/gitStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useI18n } from "../../lib/i18n";
@@ -41,10 +42,10 @@ export function GitStatusList() {
     unstageFile(activeProject.path, filePath);
   };
 
-  const handleDiscard = (e: React.MouseEvent, filePath: string) => {
+  const handleDiscard = async (e: React.MouseEvent, filePath: string) => {
     e.stopPropagation();
     if (!activeProject) return;
-    if (!window.confirm(t("git.discardConfirm"))) return;
+    if (!(await ask(t("git.discardConfirm"), { title: t("git.discard"), kind: "warning" }))) return;
     discardFile(activeProject.path, filePath);
   };
 

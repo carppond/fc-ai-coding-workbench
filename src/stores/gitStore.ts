@@ -25,6 +25,7 @@ interface GitState {
   commitMessage: string;
   loading: boolean;
   operating: boolean;
+  operationType: "commit" | "pull" | "push" | null;
   error: string | null;
   isGitRepo: boolean;
 
@@ -63,6 +64,7 @@ export const useGitStore = create<GitState>((set, get) => ({
   commitMessage: "",
   loading: false,
   operating: false,
+  operationType: null,
   error: null,
   isGitRepo: false,
 
@@ -295,42 +297,42 @@ export const useGitStore = create<GitState>((set, get) => ({
     const msg = get().commitMessage.trim();
     if (!msg) return false;
     if (get().operating) return false;
-    set({ operating: true, error: null });
+    set({ operating: true, operationType: "commit", error: null });
     try {
       await ipc.gitCommit(projectPath, msg);
-      set({ commitMessage: "", selectedFile: null, selectedFileDiff: "", operating: false });
+      set({ commitMessage: "", selectedFile: null, selectedFileDiff: "", operating: false, operationType: null });
       get().refresh(projectPath);
       return true;
     } catch (e: unknown) {
-      set({ error: extractErrorMessage(e), operating: false });
+      set({ error: extractErrorMessage(e), operating: false, operationType: null });
       return false;
     }
   },
 
   pull: async (projectPath) => {
     if (get().operating) return false;
-    set({ operating: true, error: null });
+    set({ operating: true, operationType: "pull", error: null });
     try {
       await ipc.gitPull(projectPath);
-      set({ operating: false });
+      set({ operating: false, operationType: null });
       get().refresh(projectPath);
       return true;
     } catch (e: unknown) {
-      set({ error: extractErrorMessage(e), operating: false });
+      set({ error: extractErrorMessage(e), operating: false, operationType: null });
       return false;
     }
   },
 
   push: async (projectPath) => {
     if (get().operating) return false;
-    set({ operating: true, error: null });
+    set({ operating: true, operationType: "push", error: null });
     try {
       await ipc.gitPush(projectPath);
-      set({ operating: false });
+      set({ operating: false, operationType: null });
       get().refresh(projectPath);
       return true;
     } catch (e: unknown) {
-      set({ error: extractErrorMessage(e), operating: false });
+      set({ error: extractErrorMessage(e), operating: false, operationType: null });
       return false;
     }
   },
@@ -349,6 +351,7 @@ export const useGitStore = create<GitState>((set, get) => ({
       selectedFileDiff: "",
       loading: false,
       operating: false,
+      operationType: null,
       error: null,
       isGitRepo: false,
     });

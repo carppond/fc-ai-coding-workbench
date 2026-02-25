@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { useSettingsStore, type Theme } from "../../stores/settingsStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useI18n } from "../../lib/i18n";
@@ -89,7 +90,7 @@ export function SetupWizard() {
     const msg = t("wizard.writeConfirm")
       .replace("{path}", shellConfigPath)
       .replace("{content}", content);
-    if (!window.confirm(msg)) return;
+    if (!(await ask(msg, { title: t("wizard.apiConfig"), kind: "info" }))) return;
 
     try {
       const path = await ipc.writeEnvToShell(

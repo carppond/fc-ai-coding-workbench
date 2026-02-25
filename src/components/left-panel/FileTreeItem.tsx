@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { ChevronRight, ChevronDown, Folder, FileText, Loader } from "lucide-react";
+import { ask } from "@tauri-apps/plugin-dialog";
 import type { DirEntry } from "../../lib/types";
 import { useFileStore } from "../../stores/fileStore";
 import { useI18n } from "../../lib/i18n";
@@ -122,7 +123,7 @@ export function FileTreeItem({ entry, depth, defaultExpanded }: FileTreeItemProp
   const handleDelete = async () => {
     setContextMenu(null);
     const msg = t("fileTree.deleteConfirm").replace("{name}", entry.name);
-    if (!window.confirm(msg)) return;
+    if (!(await ask(msg, { title: t("fileTree.delete"), kind: "warning" }))) return;
     try {
       await ipc.deleteEntry(entry.path);
       const parent = getParentPath(entry.path);

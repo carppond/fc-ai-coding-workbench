@@ -1,12 +1,13 @@
 import { useEffect, useRef } from "react";
 import { Loader2 } from "lucide-react";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { useGitStore } from "../../stores/gitStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useI18n } from "../../lib/i18n";
 import { useToast } from "../common/Toast";
 
 export function GitActions() {
-  const { commitMessage, setCommitMessage, commit, pull, push, operating, error, clearError, fileStatuses } =
+  const { commitMessage, setCommitMessage, commit, pull, push, operating, operationType, error, clearError, fileStatuses } =
     useGitStore();
   const { activeProject } = useProjectStore();
   const { t } = useI18n();
@@ -30,16 +31,24 @@ export function GitActions() {
     if (ok) toast(t("git.commitSuccess"), "success");
   };
 
+  const hasUncommitted = fileStatuses.length > 0;
+
   const handlePull = async () => {
     if (!activeProject) return;
-    if (!window.confirm(t("git.pullConfirm"))) return;
+    const msg = hasUncommitted
+      ? t("git.pullConfirmDirty")
+      : t("git.pullConfirm");
+    if (!(await ask(msg, { title: t("git.pull"), kind: "warning" }))) return;
     const ok = await pull(activeProject.path);
     if (ok) toast(t("git.pullSuccess"), "success");
   };
 
   const handlePush = async () => {
     if (!activeProject) return;
-    if (!window.confirm(t("git.pushConfirm"))) return;
+    const msg = hasUncommitted
+      ? t("git.pushConfirmDirty")
+      : t("git.pushConfirm");
+    if (!(await ask(msg, { title: t("git.push"), kind: "warning" }))) return;
     const ok = await push(activeProject.path);
     if (ok) toast(t("git.pushSuccess"), "success");
   };
@@ -65,7 +74,7 @@ export function GitActions() {
           onClick={handleCommit}
           disabled={!commitMessage.trim() || !hasStagedFiles || operating}
         >
-          {operating ? <Loader2 size={13} className="spin" /> : null}
+          {operationType === "commit" ? <Loader2 size={13} className="spin" /> : null}
           {t("git.commit")}
         </button>
         <button
@@ -73,6 +82,7 @@ export function GitActions() {
           onClick={handlePull}
           disabled={operating}
         >
+          {operationType === "pull" ? <Loader2 size={13} className="spin" /> : null}
           {t("git.pull")}
         </button>
         <button
@@ -80,6 +90,7 @@ export function GitActions() {
           onClick={handlePush}
           disabled={operating}
         >
+          {operationType === "push" ? <Loader2 size={13} className="spin" /> : null}
           {t("git.push")}
         </button>
       </div>
