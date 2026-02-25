@@ -481,16 +481,9 @@ const GIT_REMOTE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3
 /// Detect the default branch name on origin (main, master, etc.)
 async fn detect_remote_branch(project_path: &str) -> Option<String> {
     for branch in &["main", "master", "develop"] {
-        let ok = tokio::process::Command::new("git")
-            .args(["rev-parse", "--verify", &format!("origin/{}", branch)])
-            .current_dir(project_path)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .await
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if ok {
+        if let Ok((true, _, _)) =
+            run_git(project_path, &["rev-parse", "--verify", &format!("origin/{}", branch)]).await
+        {
             return Some(branch.to_string());
         }
     }
@@ -533,6 +526,7 @@ async fn run_git(
     let child = tokio::process::Command::new("git")
         .args(args)
         .current_dir(project_path)
+        .env("PATH", crate::commands::setup_commands::user_shell_path())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()?;
@@ -591,54 +585,31 @@ pub async fn init_repo(project_path: &str, remote_url: Option<&str>) -> AppResul
             drop(repo); // release lock so git CLI can access
 
             // Fetch from remote (may fail if repo is empty or network unreachable)
-            let fetch = tokio::time::timeout(
-                GIT_REMOTE_TIMEOUT,
-                tokio::process::Command::new("git")
-                    .args(["fetch", "origin"])
-                    .current_dir(project_path)
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::piped())
-                    .output(),
-            )
-            .await;
+            let fetch = run_git(project_path, &["fetch", "origin"]).await;
 
-            if let Ok(Ok(output)) = fetch {
-                if output.status.success() {
-                    // Detect default branch on remote
-                    if let Some(branch) = detect_remote_branch(project_path).await {
-                        // Check if local repo has any commits
-                        let has_commits = {
-                            let r = Repository::open(project_path).ok();
-                            r.and_then(|repo| {
-                                let head = repo.head().ok()?;
-                                head.target()
-                            })
-                            .is_some()
-                        };
+            if let Ok((true, _, _)) = fetch {
+                // Detect default branch on remote
+                if let Some(branch) = detect_remote_branch(project_path).await {
+                    // Check if local repo has any commits
+                    let has_commits = {
+                        let r = Repository::open(project_path).ok();
+                        r.and_then(|repo| {
+                            let head = repo.head().ok()?;
+                            head.target()
+                        })
+                        .is_some()
+                    };
 
-                        if !has_commits {
-                            // No local commits — checkout remote branch (sets tracking automatically)
-                            let _ = tokio::process::Command::new("git")
-                                .args(["checkout", &branch])
-                                .current_dir(project_path)
-                                .stdout(std::process::Stdio::piped())
-                                .stderr(std::process::Stdio::piped())
-                                .output()
-                                .await;
-                        } else {
-                            // Local has commits — just set upstream tracking
-                            let _ = tokio::process::Command::new("git")
-                                .args([
-                                    "branch",
-                                    "--set-upstream-to",
-                                    &format!("origin/{}", branch),
-                                ])
-                                .current_dir(project_path)
-                                .stdout(std::process::Stdio::piped())
-                                .stderr(std::process::Stdio::piped())
-                                .output()
-                                .await;
-                        }
+                    if !has_commits {
+                        // No local commits — checkout remote branch (sets tracking automatically)
+                        let _ = run_git(project_path, &["checkout", &branch]).await;
+                    } else {
+                        // Local has commits — just set upstream tracking
+                        let _ = run_git(
+                            project_path,
+                            &["branch", "--set-upstream-to", &format!("origin/{}", branch)],
+                        )
+                        .await;
                     }
                 }
             }

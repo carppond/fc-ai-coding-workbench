@@ -2,6 +2,7 @@ use crate::errors::{AppError, AppResult};
 use serde::Serialize;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 
 #[derive(Debug, Serialize, Clone)]
 pub struct EnvCheckResult {
@@ -16,10 +17,97 @@ pub struct EnvCheckResult {
     pub platform: String,
 }
 
-/// Run a command and return trimmed stdout, or None if it fails.
+/// Get the user's full PATH by scanning the filesystem for common tool locations.
+///
+/// macOS GUI apps (.app) inherit only the minimal system PATH (/usr/bin:/bin:/usr/sbin:/sbin),
+/// which doesn't include Homebrew, nvm, volta, fnm, or npm global bin paths.
+/// Instead of running a shell (which can hang), we detect paths by checking the filesystem.
+/// The result is cached via OnceLock.
+pub fn user_shell_path() -> &'static str {
+    static CACHED: OnceLock<String> = OnceLock::new();
+    CACHED.get_or_init(|| {
+        #[cfg(not(target_os = "windows"))]
+        {
+            let home = std::env::var("HOME").unwrap_or_default();
+            let current = std::env::var("PATH").unwrap_or_default();
+            let mut extra: Vec<String> = Vec::new();
+
+            // Homebrew
+            for p in &["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin"] {
+                if std::path::Path::new(p).is_dir() {
+                    extra.push(p.to_string());
+                }
+            }
+
+            // nvm — find the default node version's bin directory
+            let nvm_dir = std::env::var("NVM_DIR")
+                .unwrap_or_else(|_| format!("{}/.nvm", home));
+            if std::path::Path::new(&nvm_dir).is_dir() {
+                let alias = format!("{}/alias/default", nvm_dir);
+                if let Ok(ver) = std::fs::read_to_string(&alias) {
+                    let ver = ver.trim().to_string();
+                    let versions_dir = format!("{}/versions/node", nvm_dir);
+                    if let Ok(entries) = std::fs::read_dir(&versions_dir) {
+                        // Sort entries descending so newest matching version wins
+                        let mut dirs: Vec<_> = entries.flatten().collect();
+                        dirs.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+                        for entry in dirs {
+                            let name = entry.file_name().to_string_lossy().to_string();
+                            if name.starts_with(&format!("v{}", ver)) || name == ver {
+                                let bin = entry.path().join("bin");
+                                if bin.is_dir() {
+                                    extra.push(bin.to_string_lossy().to_string());
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // volta
+            let volta_bin = format!("{}/.volta/bin", home);
+            if std::path::Path::new(&volta_bin).is_dir() {
+                extra.push(volta_bin);
+            }
+
+            // fnm
+            let fnm_bin = format!("{}/.fnm/aliases/default/bin", home);
+            if std::path::Path::new(&fnm_bin).is_dir() {
+                extra.push(fnm_bin);
+            }
+
+            // Cargo
+            let cargo_bin = format!("{}/.cargo/bin", home);
+            if std::path::Path::new(&cargo_bin).is_dir() {
+                extra.push(cargo_bin);
+            }
+
+            // ~/.local/bin
+            let local_bin = format!("{}/.local/bin", home);
+            if std::path::Path::new(&local_bin).is_dir() {
+                extra.push(local_bin);
+            }
+
+            if extra.is_empty() {
+                current
+            } else {
+                format!("{}:{}", extra.join(":"), current)
+            }
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            std::env::var("PATH").unwrap_or_default()
+        }
+    })
+}
+
+/// Run a command with the user's full PATH and return trimmed stdout, or None if it fails.
 fn run_version_cmd(program: &str, args: &[&str]) -> Option<String> {
     Command::new(program)
         .args(args)
+        .env("PATH", user_shell_path())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .output()
@@ -35,6 +123,7 @@ fn run_version_cmd(program: &str, args: &[&str]) -> Option<String> {
 fn is_npm_global(package: &str) -> bool {
     Command::new("npm")
         .args(["list", "-g", package, "--depth=0"])
+        .env("PATH", user_shell_path())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
@@ -46,6 +135,7 @@ fn is_npm_global(package: &str) -> bool {
 fn is_brew_installed(formula: &str) -> bool {
     Command::new("brew")
         .args(["list", formula])
+        .env("PATH", user_shell_path())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
@@ -56,6 +146,9 @@ fn is_brew_installed(formula: &str) -> bool {
 #[tauri::command]
 pub fn check_environment() -> AppResult<EnvCheckResult> {
     use std::thread;
+
+    // Resolve PATH once before spawning threads (cached after first call)
+    let _ = user_shell_path();
 
     // Phase 1: run all version checks in parallel
     let h_node = thread::spawn(|| run_version_cmd("node", &["--version"]));
@@ -156,6 +249,7 @@ pub async fn run_install_command(
 
     let mut child = Command::new(program)
         .args(&args)
+        .env("PATH", user_shell_path())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
