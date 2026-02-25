@@ -269,6 +269,8 @@ export interface EnvCheckResult {
   claude_installed: boolean;
   claude_version: string | null;
   claude_install_method: string | null; // "npm" | "brew"
+  claude_latest_version: string | null;
+  claude_update_available: boolean;
   platform: string;
 }
 

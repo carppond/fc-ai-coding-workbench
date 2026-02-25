@@ -14,6 +14,8 @@ pub struct EnvCheckResult {
     pub claude_installed: bool,
     pub claude_version: Option<String>,
     pub claude_install_method: Option<String>, // "npm" | "brew"
+    pub claude_latest_version: Option<String>,
+    pub claude_update_available: bool,
     pub platform: String,
 }
 
@@ -168,26 +170,42 @@ pub fn check_environment() -> AppResult<EnvCheckResult> {
     let claude_version = h_claude.join().unwrap_or(None);
     let claude_installed = claude_version.is_some();
 
-    // Phase 2: detect install method only if CLI is present (parallel)
-    let claude_install_method = if claude_installed {
+    // Phase 2: detect install method + latest version (only if CLI is present, all parallel)
+    let (claude_install_method, claude_latest_version) = if claude_installed {
         let h_npm_check = thread::spawn(|| is_npm_global("@anthropic-ai/claude-code"));
         let check_brew = cfg!(target_os = "macos") && brew_installed;
         let h_brew_check = thread::spawn(move || {
             if check_brew { is_brew_installed("claude") } else { false }
         });
+        let h_latest = thread::spawn(|| {
+            run_version_cmd("npm", &["view", "@anthropic-ai/claude-code", "version"])
+        });
 
         let via_npm = h_npm_check.join().unwrap_or(false);
         let via_brew = h_brew_check.join().unwrap_or(false);
+        let latest = h_latest.join().unwrap_or(None);
 
-        if via_npm {
+        let method = if via_npm {
             Some("npm".to_string())
         } else if via_brew {
             Some("brew".to_string())
         } else {
             None
-        }
+        };
+        (method, latest)
     } else {
-        None
+        (None, None)
+    };
+
+    // Compare installed vs latest version
+    let claude_update_available = match (&claude_version, &claude_latest_version) {
+        (Some(installed), Some(latest)) => {
+            // installed might be "1.0.25" or "claude 1.0.25" — extract the version part
+            let cur = installed.split_whitespace().last().unwrap_or("");
+            let lat = latest.split_whitespace().last().unwrap_or("");
+            !cur.is_empty() && !lat.is_empty() && cur != lat
+        }
+        _ => false,
     };
 
     let platform = if cfg!(target_os = "macos") {
@@ -208,6 +226,8 @@ pub fn check_environment() -> AppResult<EnvCheckResult> {
         claude_installed,
         claude_version,
         claude_install_method,
+        claude_latest_version,
+        claude_update_available,
         platform,
     })
 }

@@ -245,15 +245,17 @@ export function EnvironmentSetup({ compact = false, preloadedEnv }: EnvironmentS
               <Download size={14} />
               {installTarget === "install_cli" ? t("env.installing") : t("env.install")}
             </button>
-          ) : (
+          ) : env.claude_update_available ? (
             <button
               className="btn btn--sm btn--ghost"
               disabled={installing}
               onClick={() => runCommand("update_cli", env.claude_install_method || cliMethod)}
             >
-              {installTarget === "update_cli" ? t("env.installing") : t("env.update")}
+              {installTarget === "update_cli"
+                ? t("env.installing")
+                : `${t("env.update")} → ${env.claude_latest_version}`}
             </button>
-          )}
+          ) : null}
         </div>
       </div>
 
