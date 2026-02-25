@@ -138,3 +138,125 @@ fn write_env_unix(base_url: &str, auth_token: &str) -> AppResult<String> {
 fn escape_dquote(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
+
+// --- Claude Resume Auto-Save ---
+
+const RESUME_BEGIN: &str = "# ShiGuang: claude resume auto-save BEGIN";
+const RESUME_END: &str = "# ShiGuang: claude resume auto-save END";
+
+fn claude_resume_function_bash() -> &'static str {
+    r#"claude() {
+    local log=$(mktemp /tmp/claude_XXXXXX.log)
+    script -q "$log" command claude "$@"
+    local resume=$(grep -oE 'claude --resume [a-zA-Z0-9_-]+' "$log" | tail -1)
+    if [[ -n "$resume" ]]; then
+        echo "$(date '+%Y-%m-%d %H:%M') | $resume" >> "$PWD/.claude_resumes.txt"
+    fi
+    rm -f "$log"
+}"#
+}
+
+fn claude_resume_function_fish() -> &'static str {
+    r#"function claude --wraps='command claude'
+    set -l log (mktemp /tmp/claude_XXXXXX.log)
+    script -q $log command claude $argv
+    set -l resume (grep -oE 'claude --resume [a-zA-Z0-9_-]+' $log | tail -1)
+    if test -n "$resume"
+        echo (date '+%Y-%m-%d %H:%M')" | $resume" >> "$PWD/.claude_resumes.txt"
+    end
+    rm -f $log
+end"#
+}
+
+/// Check if the claude resume wrapper is installed in the user's shell config.
+#[tauri::command]
+pub fn get_claude_resume_enabled() -> AppResult<bool> {
+    if cfg!(target_os = "windows") {
+        return Ok(false);
+    }
+    let config_path = unix_shell_config_path().map_err(AppError::General)?;
+    let content = std::fs::read_to_string(&config_path).unwrap_or_default();
+    Ok(content.contains(RESUME_BEGIN))
+}
+
+/// Enable or disable the claude resume auto-save wrapper.
+#[tauri::command]
+pub fn set_claude_resume_enabled(enabled: bool) -> AppResult<String> {
+    if cfg!(target_os = "windows") {
+        return Err(AppError::General("Not supported on Windows".to_string()));
+    }
+
+    let config_path = unix_shell_config_path().map_err(AppError::General)?;
+    let path = std::path::Path::new(&config_path);
+    let existing = std::fs::read_to_string(path).unwrap_or_default();
+
+    // Remove existing block if present
+    let cleaned = remove_resume_block(&existing);
+
+    let new_content = if enabled {
+        let shell = std::env::var("SHELL").unwrap_or_default();
+        let shell_name = std::path::Path::new(&shell)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("zsh");
+
+        let func = if shell_name == "fish" {
+            claude_resume_function_fish()
+        } else {
+            claude_resume_function_bash()
+        };
+
+        let mut result = cleaned.clone();
+        if !result.ends_with('\n') && !result.is_empty() {
+            result.push('\n');
+        }
+        if !result.is_empty() {
+            result.push('\n');
+        }
+        result.push_str(RESUME_BEGIN);
+        result.push('\n');
+        result.push_str(func);
+        result.push('\n');
+        result.push_str(RESUME_END);
+        result.push('\n');
+        result
+    } else {
+        cleaned
+    };
+
+    std::fs::write(path, &new_content)
+        .map_err(|e| AppError::General(format!("Failed to write {}: {}", config_path, e)))?;
+
+    Ok(config_path.to_string())
+}
+
+/// Remove the resume block (between BEGIN and END markers) from content.
+fn remove_resume_block(content: &str) -> String {
+    let mut result = Vec::new();
+    let mut inside_block = false;
+
+    for line in content.lines() {
+        if line.trim() == RESUME_BEGIN {
+            inside_block = true;
+            continue;
+        }
+        if line.trim() == RESUME_END {
+            inside_block = false;
+            continue;
+        }
+        if !inside_block {
+            result.push(line);
+        }
+    }
+
+    // Remove trailing empty lines left by block removal
+    while result.last().map_or(false, |l| l.is_empty()) {
+        result.pop();
+    }
+
+    let mut out = result.join("\n");
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}

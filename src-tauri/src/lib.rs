@@ -98,6 +98,8 @@ pub fn run() {
             commands::env_commands::write_env_to_shell,
             commands::env_commands::get_shell_config_path,
             commands::env_commands::detect_platform,
+            commands::env_commands::get_claude_resume_enabled,
+            commands::env_commands::set_claude_resume_enabled,
             // Setup commands
             commands::setup_commands::check_environment,
             commands::setup_commands::run_install_command,

@@ -664,7 +664,7 @@ export function Terminal({ projectPath, onAliveChange, visible = true }: Termina
         lastCols = newCols;
         lastRows = newRows;
         if (sessionIdRef.current) {
-          ipc.resizeTerminal(sessionIdRef.current, newCols, newRows);
+          ipc.resizeTerminal(sessionIdRef.current, newRows, newCols);
         }
       }
     };

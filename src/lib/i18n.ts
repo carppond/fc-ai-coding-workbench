@@ -175,6 +175,16 @@ const translations: Record<Locale, Record<string, string>> = {
     "proxy.disabled": "未启用",
     "proxy.hint": "代理将应用于 Git、npm、终端及 API 请求。支持 HTTP/HTTPS/SOCKS5。",
 
+    // Claude Resume
+    "resume.title": "Claude Resume 自动保存",
+    "resume.desc": "退出 Claude CLI 时自动保存 resume 命令到项目目录的 .claude_resumes.txt",
+    "resume.enabled": "已启用",
+    "resume.disabled": "未启用",
+    "resume.turnOn": "启用",
+    "resume.turnOff": "关闭",
+    "resume.saved": "已写入 {path}，重新打开终端生效",
+    "resume.removed": "已从 {path} 移除",
+
     // SessionItem
     "session.deleteSession": "删除会话",
     "session.deleteConfirm": "删除 \"{title}\" 及其所有对话？",
@@ -376,6 +386,16 @@ const translations: Record<Locale, Record<string, string>> = {
     "proxy.enabled": "Enabled",
     "proxy.disabled": "Disabled",
     "proxy.hint": "Proxy applies to Git, npm, terminal, and API requests. Supports HTTP/HTTPS/SOCKS5.",
+
+    // Claude Resume
+    "resume.title": "Claude Resume Auto-Save",
+    "resume.desc": "Auto-save resume command to .claude_resumes.txt in project directory when exiting Claude CLI",
+    "resume.enabled": "Enabled",
+    "resume.disabled": "Disabled",
+    "resume.turnOn": "Enable",
+    "resume.turnOff": "Disable",
+    "resume.saved": "Written to {path}, restart terminal to take effect",
+    "resume.removed": "Removed from {path}",
 
     // SessionItem
     "session.deleteSession": "Delete Session",

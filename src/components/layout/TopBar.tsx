@@ -97,6 +97,68 @@ function ProxySettings() {
   );
 }
 
+function ClaudeResumeSettings({ platform }: { platform: string }) {
+  const { t } = useI18n();
+  const [enabled, setEnabled] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    ipc.getClaudeResumeEnabled().then((v) => {
+      setEnabled(v);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (message) {
+      const id = setTimeout(() => setMessage(""), 3000);
+      return () => clearTimeout(id);
+    }
+  }, [message]);
+
+  if (platform === "windows") return null;
+
+  const handleToggle = async () => {
+    try {
+      const newVal = !enabled;
+      const path = await ipc.setClaudeResumeEnabled(newVal);
+      setEnabled(newVal);
+      setMessage(
+        newVal
+          ? t("resume.saved").replace("{path}", path)
+          : t("resume.removed").replace("{path}", path)
+      );
+    } catch {
+      // ignore
+    }
+  };
+
+  return (
+    <div className="proxy-settings">
+      <div className="proxy-settings__status-row">
+        <label className="proxy-settings__label">{t("resume.desc")}</label>
+        <span className={`proxy-settings__badge ${enabled ? "proxy-settings__badge--on" : "proxy-settings__badge--off"}`}>
+          {enabled ? t("resume.enabled") : t("resume.disabled")}
+        </span>
+      </div>
+      <div className="proxy-settings__row">
+        <button
+          className={`btn btn--sm ${enabled ? "btn--ghost" : "btn--primary"}`}
+          style={enabled ? { background: "var(--bg-hover)" } : undefined}
+          onClick={handleToggle}
+          disabled={loading}
+        >
+          {enabled ? t("resume.turnOff") : t("resume.turnOn")}
+        </button>
+      </div>
+      {message && (
+        <div className="proxy-settings__status">{message}</div>
+      )}
+    </div>
+  );
+}
+
 export function TopBar() {
   const { openProject } = useProjectStore();
   const { loading, theme, cycleTheme, envCache } = useSettingsStore();
@@ -168,6 +230,14 @@ export function TopBar() {
                 </div>
                 <ProxySettings />
               </div>
+              {envCache?.platform !== "windows" && (
+                <div className="settings-dialog__section">
+                  <div className="settings-dialog__section-title">
+                    {t("resume.title")}
+                  </div>
+                  <ClaudeResumeSettings platform={envCache?.platform ?? ""} />
+                </div>
+              )}
               <div className="settings-dialog__section">
                 <div className="settings-dialog__section-title">
                   {t("settings.environment")}

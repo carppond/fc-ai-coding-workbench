@@ -266,6 +266,12 @@ export const getShellConfigPath = () =>
 export const detectPlatform = () =>
   invoke<string>("detect_platform");
 
+export const getClaudeResumeEnabled = () =>
+  invoke<boolean>("get_claude_resume_enabled");
+
+export const setClaudeResumeEnabled = (enabled: boolean) =>
+  invoke<string>("set_claude_resume_enabled", { enabled });
+
 // --- Setup ---
 
 export interface EnvCheckResult {

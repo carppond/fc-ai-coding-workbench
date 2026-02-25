@@ -148,7 +148,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 16px;
+  padding: 0 12px;
+  height: 40px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
@@ -1787,7 +1788,8 @@
 .center-panel-tabs {
   display: flex;
   gap: 2px;
-  padding: 4px 8px;
+  padding: 0 12px;
+  height: 40px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   background: var(--bg-secondary);
