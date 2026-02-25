@@ -68,7 +68,7 @@ pub async fn git_discard_file(project_path: String, file_path: String) -> AppRes
 
 #[tauri::command]
 pub async fn git_init_repo(project_path: String, remote_url: Option<String>) -> AppResult<()> {
-    git::init_repo(&project_path, remote_url.as_deref())
+    git::init_repo(&project_path, remote_url.as_deref()).await
 }
 
 #[tauri::command]

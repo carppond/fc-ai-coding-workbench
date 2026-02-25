@@ -29,6 +29,17 @@ pub struct GitBranchInfo {
 const MAX_STATUS_ENTRIES: usize = 500;
 const MAX_DIFF_BYTES: usize = 512 * 1024; // 512 KB
 
+/// Directories that should never be staged, even if the project has no .gitignore.
+const SKIP_DIRS: &[&str] = &[
+    "node_modules", ".git", "target", "dist", "build", ".next", ".nuxt",
+    "__pycache__", ".venv", "venv", "vendor", ".cache", ".parcel-cache",
+    ".turbo", ".output", "out", ".svelte-kit",
+];
+
+fn is_skip_dir(name: &str) -> bool {
+    SKIP_DIRS.iter().any(|d| *d == name)
+}
+
 pub fn status(project_path: &str) -> AppResult<Vec<GitFileStatus>> {
     let repo = Repository::open(project_path)?;
     let mut opts = StatusOptions::new();
@@ -46,6 +57,14 @@ pub fn status(project_path: &str) -> AppResult<Vec<GitFileStatus>> {
 
         let path = entry.path().unwrap_or("").trim_end_matches('/').to_string();
         let s = entry.status();
+
+        // Filter out common large directories even if the project has no .gitignore
+        {
+            let top = path.split('/').next().unwrap_or("");
+            if is_skip_dir(top) {
+                continue;
+            }
+        }
 
         if s.contains(git2::Status::INDEX_NEW)
             || s.contains(git2::Status::INDEX_MODIFIED)
@@ -183,8 +202,9 @@ pub fn stage_all(project_path: &str) -> AppResult<()> {
         } else if s.contains(git2::Status::WT_NEW) || s.contains(git2::Status::WT_MODIFIED) {
             let full_path = project.join(&path_str);
             if full_path.is_dir() {
-                // Skip nested git repos
-                if full_path.join(".git").exists() {
+                // Skip nested git repos and common large directories
+                let dir_name = full_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if full_path.join(".git").exists() || is_skip_dir(dir_name) {
                     continue;
                 }
                 // Stage directory contents
@@ -234,10 +254,18 @@ pub fn stage_file(project_path: &str, file_path: &str) -> AppResult<()> {
     }
 
     if full_path.is_dir() {
+        let dir_name = full_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
         // Nested git repo — cannot stage directly
         if full_path.join(".git").exists() {
             return Err(AppError::General(format!(
                 "'{}' is a nested git repository. Use 'git submodule add' or add it to .gitignore.",
+                file_path
+            )));
+        }
+        // Block staging common large directories that should be in .gitignore
+        if is_skip_dir(dir_name) {
+            return Err(AppError::General(format!(
+                "'{}' should be added to .gitignore instead of being staged.",
                 file_path
             )));
         }
@@ -450,6 +478,32 @@ pub fn discard_file(project_path: &str, file_path: &str) -> AppResult<()> {
 
 const GIT_REMOTE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// Detect the default branch name on origin (main, master, etc.)
+async fn detect_remote_branch(project_path: &str) -> Option<String> {
+    for branch in &["main", "master", "develop"] {
+        let ok = tokio::process::Command::new("git")
+            .args(["rev-parse", "--verify", &format!("origin/{}", branch)])
+            .current_dir(project_path)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if ok {
+            return Some(branch.to_string());
+        }
+    }
+    None
+}
+
+/// Detect current local branch name
+fn current_branch_name(project_path: &str) -> Option<String> {
+    let repo = Repository::open(project_path).ok()?;
+    let head = repo.head().ok()?;
+    head.shorthand().map(|s| s.to_string())
+}
+
 pub async fn pull(project_path: &str) -> AppResult<String> {
     let child = tokio::process::Command::new("git")
         .arg("pull")
@@ -459,23 +513,111 @@ pub async fn pull(project_path: &str) -> AppResult<String> {
         .spawn()?;
     let output = tokio::time::timeout(GIT_REMOTE_TIMEOUT, child.wait_with_output())
         .await
-        .map_err(|_| AppError::General("git pull timed out (30s)".to_string()))?
-        ?;
+        .map_err(|_| AppError::General("git pull timed out (30s)".to_string()))??;
+
     if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    } else {
-        Err(AppError::General(
-            String::from_utf8_lossy(&output.stderr).to_string(),
-        ))
+        return Ok(String::from_utf8_lossy(&output.stdout).to_string());
     }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    // No tracking branch — auto-detect and retry
+    if stderr.contains("no tracking information") || stderr.contains("No tracking information") {
+        if let Some(branch) = detect_remote_branch(project_path).await {
+            let retry = tokio::process::Command::new("git")
+                .args(["pull", "origin", &branch, "--allow-unrelated-histories"])
+                .current_dir(project_path)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()?;
+            let retry_out = tokio::time::timeout(GIT_REMOTE_TIMEOUT, retry.wait_with_output())
+                .await
+                .map_err(|_| AppError::General("git pull timed out (30s)".to_string()))??;
+
+            if retry_out.status.success() {
+                // Set tracking for future pulls
+                let _ = tokio::process::Command::new("git")
+                    .args([
+                        "branch",
+                        "--set-upstream-to",
+                        &format!("origin/{}", branch),
+                    ])
+                    .current_dir(project_path)
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .output()
+                    .await;
+                return Ok(String::from_utf8_lossy(&retry_out.stdout).to_string());
+            }
+            return Err(AppError::General(
+                String::from_utf8_lossy(&retry_out.stderr).to_string(),
+            ));
+        }
+    }
+
+    Err(AppError::General(stderr))
 }
 
-pub fn init_repo(project_path: &str, remote_url: Option<&str>) -> AppResult<()> {
+pub async fn init_repo(project_path: &str, remote_url: Option<&str>) -> AppResult<()> {
     let repo = Repository::init(project_path)?;
     if let Some(url) = remote_url {
         let url = url.trim();
         if !url.is_empty() {
             repo.remote("origin", url)?;
+            drop(repo); // release lock so git CLI can access
+
+            // Fetch from remote (may fail if repo is empty or network unreachable)
+            let fetch = tokio::time::timeout(
+                GIT_REMOTE_TIMEOUT,
+                tokio::process::Command::new("git")
+                    .args(["fetch", "origin"])
+                    .current_dir(project_path)
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .output(),
+            )
+            .await;
+
+            if let Ok(Ok(output)) = fetch {
+                if output.status.success() {
+                    // Detect default branch on remote
+                    if let Some(branch) = detect_remote_branch(project_path).await {
+                        // Check if local repo has any commits
+                        let has_commits = {
+                            let r = Repository::open(project_path).ok();
+                            r.and_then(|repo| {
+                                let head = repo.head().ok()?;
+                                head.target()
+                            })
+                            .is_some()
+                        };
+
+                        if !has_commits {
+                            // No local commits — checkout remote branch (sets tracking automatically)
+                            let _ = tokio::process::Command::new("git")
+                                .args(["checkout", &branch])
+                                .current_dir(project_path)
+                                .stdout(std::process::Stdio::piped())
+                                .stderr(std::process::Stdio::piped())
+                                .output()
+                                .await;
+                        } else {
+                            // Local has commits — just set upstream tracking
+                            let _ = tokio::process::Command::new("git")
+                                .args([
+                                    "branch",
+                                    "--set-upstream-to",
+                                    &format!("origin/{}", branch),
+                                ])
+                                .current_dir(project_path)
+                                .stdout(std::process::Stdio::piped())
+                                .stderr(std::process::Stdio::piped())
+                                .output()
+                                .await;
+                        }
+                    }
+                }
+            }
         }
     }
     Ok(())
@@ -490,13 +632,35 @@ pub async fn push(project_path: &str) -> AppResult<String> {
         .spawn()?;
     let output = tokio::time::timeout(GIT_REMOTE_TIMEOUT, child.wait_with_output())
         .await
-        .map_err(|_| AppError::General("git push timed out (30s)".to_string()))?
-        ?;
+        .map_err(|_| AppError::General("git push timed out (30s)".to_string()))??;
+
     if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    } else {
-        Err(AppError::General(
-            String::from_utf8_lossy(&output.stderr).to_string(),
-        ))
+        return Ok(String::from_utf8_lossy(&output.stdout).to_string());
     }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    // No upstream branch — push with -u to set tracking
+    if stderr.contains("no upstream branch") || stderr.contains("has no upstream branch") {
+        if let Some(branch) = current_branch_name(project_path) {
+            let retry = tokio::process::Command::new("git")
+                .args(["push", "-u", "origin", &branch])
+                .current_dir(project_path)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()?;
+            let retry_out = tokio::time::timeout(GIT_REMOTE_TIMEOUT, retry.wait_with_output())
+                .await
+                .map_err(|_| AppError::General("git push timed out (30s)".to_string()))??;
+
+            if retry_out.status.success() {
+                return Ok(String::from_utf8_lossy(&retry_out.stdout).to_string());
+            }
+            return Err(AppError::General(
+                String::from_utf8_lossy(&retry_out.stderr).to_string(),
+            ));
+        }
+    }
+
+    Err(AppError::General(stderr))
 }
