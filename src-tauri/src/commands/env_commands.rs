@@ -146,7 +146,7 @@ const RESUME_END: &str = "# ShiGuang: claude resume auto-save END";
 
 fn claude_resume_function_bash() -> &'static str {
     r#"claude() {
-    local log=$(mktemp /tmp/claude_XXXXXX.log)
+    local log=$(mktemp /tmp/claude_resume_XXXXXX)
     script -q "$log" command claude "$@"
     local resume=$(grep -oE 'claude --resume [a-zA-Z0-9_-]+' "$log" | tail -1)
     if [[ -n "$resume" ]]; then
@@ -158,7 +158,7 @@ fn claude_resume_function_bash() -> &'static str {
 
 fn claude_resume_function_fish() -> &'static str {
     r#"function claude --wraps='command claude'
-    set -l log (mktemp /tmp/claude_XXXXXX.log)
+    set -l log (mktemp /tmp/claude_resume_XXXXXX)
     script -q $log command claude $argv
     set -l resume (grep -oE 'claude --resume [a-zA-Z0-9_-]+' $log | tail -1)
     if test -n "$resume"
