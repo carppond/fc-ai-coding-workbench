@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, memo } from "react";
 import { Terminal as XTerm, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
@@ -397,17 +397,20 @@ interface TerminalProps {
   visible?: boolean;
 }
 
-export function Terminal({ projectPath, onAliveChange, visible = true }: TerminalProps) {
+export const Terminal = memo(function Terminal({ projectPath, onAliveChange, visible = true }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
-  const spawnedForPath = useRef<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const shellNameRef = useRef<string | null>(null);
   // Track latest projectPath via ref so the spawn timer can read it
   const projectPathRef = useRef(projectPath);
   projectPathRef.current = projectPath;
+  // Track visibility via ref for output buffering (avoids xterm processing when hidden)
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
+  const outputBufferRef = useRef<string[]>([]);
   const theme = useSettingsStore((s) => s.theme);
 
   // Inline search bar state
@@ -420,8 +423,8 @@ export function Terminal({ projectPath, onAliveChange, visible = true }: Termina
   const toggleSearch = useCallback(() => {
     setSearchVisible((v) => {
       if (!v) {
-        // Opening: focus input after render
-        setTimeout(() => searchInputRef.current?.focus(), 0);
+        // Opening: focus input after DOM has painted
+        requestAnimationFrame(() => searchInputRef.current?.focus());
       } else {
         // Closing: refocus terminal
         xtermRef.current?.focus();
@@ -433,13 +436,13 @@ export function Terminal({ projectPath, onAliveChange, visible = true }: Termina
 
   const handleSearchNext = useCallback(() => {
     if (searchQuery && searchAddonRef.current) {
-      searchAddonRef.current.findNext(searchQuery);
+      try { searchAddonRef.current.findNext(searchQuery); } catch { /* invalid regex */ }
     }
   }, [searchQuery]);
 
   const handleSearchPrev = useCallback(() => {
     if (searchQuery && searchAddonRef.current) {
-      searchAddonRef.current.findPrevious(searchQuery);
+      try { searchAddonRef.current.findPrevious(searchQuery); } catch { /* invalid regex */ }
     }
   }, [searchQuery]);
 
@@ -457,16 +460,26 @@ export function Terminal({ projectPath, onAliveChange, visible = true }: Termina
     }
   }, [theme]);
 
-  // Re-fit when visibility changes (tab switch)
+  // Re-fit when visibility changes (tab switch) and flush buffered output
   useEffect(() => {
-    if (visible && fitAddonRef.current) {
-      try {
-        fitAddonRef.current.fit();
-      } catch {
-        /* container not visible yet */
+    if (visible) {
+      // Flush any output that was buffered while hidden
+      if (xtermRef.current && outputBufferRef.current.length > 0) {
+        const buffered = outputBufferRef.current.join("");
+        outputBufferRef.current = [];
+        xtermRef.current.write(buffered);
       }
-      // Focus terminal when becoming visible
-      xtermRef.current?.focus();
+      if (fitAddonRef.current) {
+        try {
+          fitAddonRef.current.fit();
+        } catch {
+          /* container not visible yet */
+        }
+      }
+      // Focus terminal after DOM has painted (display:none → block needs a frame)
+      requestAnimationFrame(() => {
+        xtermRef.current?.focus();
+      });
     }
   }, [visible]);
 
@@ -602,6 +615,10 @@ export function Terminal({ projectPath, onAliveChange, visible = true }: Termina
     // Right-click → paste from clipboard (with bracketed paste)
     const handleContextMenu = (e: MouseEvent) => {
       e.preventDefault();
+      if (!sessionIdRef.current) {
+        term.write("\r\n\x1b[33m[Terminal is starting...]\x1b[0m\r\n");
+        return;
+      }
       readText().then((text) => {
         if (text) bracketedPaste(text);
       }).catch(() => { /* clipboard empty or permission denied */ });
@@ -622,46 +639,82 @@ export function Terminal({ projectPath, onAliveChange, visible = true }: Termina
       try { fitAddon.fit(); } catch { /* container not visible */ }
     };
 
-    // Delay spawn slightly to let projectStore finish loading.
-    const spawnTimer = setTimeout(() => {
+    // Spawn PTY after one animation frame (ensures DOM/layout is ready).
+    // projectPath may still be null here; the PTY will start in the default
+    // directory and CenterPanel will recreate the terminal once the project loads.
+    // Helper to set up event listeners and state after obtaining a session
+    const setupSession = (sessionId: string, shellName: string) => {
+      if (disposed) {
+        ipc.killTerminal(sessionId);
+        return;
+      }
+      sessionIdRef.current = sessionId;
+      shellNameRef.current = shellName;
+      onAliveChange?.(true);
+
+      // Set up per-session event listeners AFTER we have sessionId
+      // When terminal is hidden, buffer output to avoid unnecessary xterm processing
+      listen<string>(`terminal-output-${sessionId}`, (event) => {
+        if (disposed) return;
+        const data = fixGlyphs(event.payload);
+        if (visibleRef.current) {
+          term.write(data);
+        } else {
+          // Cap buffer to prevent unbounded memory growth from hidden terminals
+          const buf = outputBufferRef.current;
+          if (buf.length < 5000) {
+            buf.push(data);
+          }
+        }
+      }).then((fn) => {
+        if (disposed) { fn(); return; }
+        unlistenOutputFn = fn;
+      });
+
+      listen<string>(`terminal-exit-${sessionId}`, () => {
+        if (disposed) return;
+        term.write("\r\n[Process exited]\r\n");
+        onAliveChange?.(false);
+      }).then((fn) => {
+        if (disposed) { fn(); return; }
+        unlistenExitFn = fn;
+      });
+
+      // Pre-warm next terminal session (fire-and-forget)
+      ipc.warmupTerminal(projectPathRef.current ?? undefined).catch(() => {});
+    };
+
+    let rafId = requestAnimationFrame(() => {
       if (disposed) return;
       safeFit();
       const path = projectPathRef.current;
-      ipc.spawnTerminal(path ?? undefined, term.rows, term.cols).then(([sessionId, shellName]) => {
-        if (disposed) {
-          // Spawned but component already unmounted — kill it
-          ipc.killTerminal(sessionId);
-          return;
-        }
-        sessionIdRef.current = sessionId;
-        shellNameRef.current = shellName;
-        spawnedForPath.current = path;
-        onAliveChange?.(true);
 
-        // Set up per-session event listeners AFTER we have sessionId
-        listen<string>(`terminal-output-${sessionId}`, (event) => {
+      // Try to claim a pre-warmed terminal first, fallback to normal spawn
+      ipc.claimWarmupTerminal(path ?? undefined, term.rows, term.cols)
+        .then((result) => {
           if (disposed) return;
-          term.write(fixGlyphs(event.payload));
-        }).then((fn) => {
-          if (disposed) { fn(); return; }
-          unlistenOutputFn = fn;
-        });
-
-        listen<string>(`terminal-exit-${sessionId}`, () => {
+          if (result) {
+            // Got a pre-warmed session — use it immediately
+            setupSession(result[0], result[1]);
+          } else {
+            // No warmup available — normal spawn
+            return ipc.spawnTerminal(path ?? undefined, term.rows, term.cols)
+              .then(([sessionId, shellName]) => setupSession(sessionId, shellName));
+          }
+        })
+        .catch((err) => {
           if (disposed) return;
-          term.write("\r\n[Process exited]\r\n");
+          term.write(`\r\n\x1b[31m[Failed to spawn terminal: ${err}]\x1b[0m\r\n`);
           onAliveChange?.(false);
-        }).then((fn) => {
-          if (disposed) { fn(); return; }
-          unlistenExitFn = fn;
         });
-      });
-    }, 500);
+    });
 
     let unlistenOutputFn: (() => void) | null = null;
     let unlistenExitFn: (() => void) | null = null;
 
-    // Handle resize: fit immediately (prevents font stretching), debounce PTY notification
+    // Handle resize: fit immediately (prevents font stretching),
+    // debounce PTY notification so CLI apps reflow once after drag ends (avoids
+    // intermediate SIGWINCH causing rendering artifacts in TUI apps like Claude CLI)
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
     let lastCols = term.cols;
     let lastRows = term.rows;
@@ -680,9 +733,10 @@ export function Terminal({ projectPath, onAliveChange, visible = true }: Termina
     const onResize = () => {
       // Fit immediately so characters never appear stretched
       safeFit();
-      // Debounce only the PTY resize notification
+      // Debounce PTY resize: only notify after resize settles, so CLI apps
+      // receive a single SIGWINCH and produce one clean reflow
       if (resizeTimer) clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(notifyPtyResize, 80);
+      resizeTimer = setTimeout(notifyPtyResize, 100);
     };
 
     const resizeObserver = new ResizeObserver(() => {
@@ -692,7 +746,7 @@ export function Terminal({ projectPath, onAliveChange, visible = true }: Termina
 
     return () => {
       disposed = true;
-      clearTimeout(spawnTimer);
+      cancelAnimationFrame(rafId);
       resizeObserver.disconnect();
       container.removeEventListener("paste", handlePaste, true);
       container.removeEventListener("contextmenu", handleContextMenu);
@@ -712,27 +766,18 @@ export function Terminal({ projectPath, onAliveChange, visible = true }: Termina
     };
   }, []); // only mount once
 
-  // When project changes, cd into it (delay to let shell finish initializing)
-  useEffect(() => {
-    if (projectPath && projectPath !== spawnedForPath.current && sessionIdRef.current) {
-      const sid = sessionIdRef.current;
-      const timer = setTimeout(() => {
-        ipc.terminalCd(sid, projectPath).catch((err) => {
-          console.warn("terminalCd failed:", err);
-        });
-      }, 1500);
-      spawnedForPath.current = projectPath;
-      return () => clearTimeout(timer);
-    }
-  }, [projectPath]);
 
-  // Live search as user types
+
+  // Debounced search as user types
   useEffect(() => {
     if (!searchVisible || !searchQuery) {
       searchAddonRef.current?.clearDecorations();
       return;
     }
-    searchAddonRef.current?.findNext(searchQuery);
+    const timer = setTimeout(() => {
+      try { searchAddonRef.current?.findNext(searchQuery); } catch { /* invalid regex */ }
+    }, 200);
+    return () => clearTimeout(timer);
   }, [searchQuery, searchVisible]);
 
   return (
@@ -786,4 +831,4 @@ export function Terminal({ projectPath, onAliveChange, visible = true }: Termina
       />
     </div>
   );
-}
+});

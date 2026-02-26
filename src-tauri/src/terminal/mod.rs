@@ -79,8 +79,6 @@ impl TerminalSession {
     ) -> Result<Self, String> {
         let session_id = uuid::Uuid::new_v4().to_string();
 
-        Self::cleanup_stale_temp_files();
-
         let pty_system = native_pty_system();
 
         let size = PtySize {
@@ -495,7 +493,8 @@ end
     // ── Cleanup ─────────────────────────────────────────────────────
 
     /// Remove leftover temp files from previous sessions.
-    fn cleanup_stale_temp_files() {
+    /// Called once at app startup instead of per-spawn to avoid scanning temp dir repeatedly.
+    pub fn cleanup_stale_temp_files() {
         let tmp = std::env::temp_dir();
         if let Ok(entries) = std::fs::read_dir(&tmp) {
             for entry in entries.flatten() {

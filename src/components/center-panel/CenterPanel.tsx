@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { Plus, X, RotateCw } from "lucide-react";
 import { useProjectStore } from "../../stores/projectStore";
 import { useFileStore } from "../../stores/fileStore";
@@ -35,6 +35,19 @@ export function CenterPanel() {
 
   const activeTab = openFilePath ? "file" : "terminal";
   const projectPath = activeProject?.path ?? null;
+  const projectId = activeProject?.id ?? null;
+
+  // Reset terminals when switching projects: close all old tabs, create one fresh terminal
+  const prevProjectIdRef = useRef(projectId);
+  useEffect(() => {
+    if (projectId !== null && prevProjectIdRef.current !== null && projectId !== prevProjectIdRef.current) {
+      tabCounterRef.current = 1;
+      const id = nextTabId();
+      setTabs([{ id, title: "Terminal 1", alive: true }]);
+      setActiveTabId(id);
+    }
+    prevProjectIdRef.current = projectId;
+  }, [projectId]);
 
   const handleAliveChange = useCallback((tabId: string, alive: boolean) => {
     setTabs((prev) => prev.map((tab) => (tab.id === tabId ? { ...tab, alive } : tab)));
@@ -50,16 +63,9 @@ export function CenterPanel() {
         title: `Terminal ${tabCounterRef.current}`,
         alive: true,
       };
+      setActiveTabId(id);
       return [...prev, newTab];
     });
-    // Set active to the new tab after state update
-    setTimeout(() => {
-      setTabs((current) => {
-        const last = current[current.length - 1];
-        if (last) setActiveTabId(last.id);
-        return current;
-      });
-    }, 0);
   }, []);
 
   const handleCloseTab = useCallback((tabId: string) => {
@@ -155,35 +161,38 @@ export function CenterPanel() {
 
       {/* Content area */}
       <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
-        {activeTab === "file" && openFilePath ? (
-          <FileViewer />
-        ) : (
-          <>
-            {/* Render all terminal tabs — only the active one is visible */}
-            {tabs.map((tab) => (
-              <Terminal
-                key={tab.id}
-                projectPath={projectPath}
-                onAliveChange={(alive) => handleAliveChange(tab.id, alive)}
-                visible={activeTabId === tab.id && activeTab === "terminal"}
-              />
-            ))}
-
-            {/* Exited overlay for active tab */}
-            {tabs.find((t) => t.id === activeTabId && !t.alive) && (
-              <div className="terminal-exited-overlay">
-                <span>{t("terminal.exited")}</span>
-                <button
-                  className="btn btn--primary btn--sm"
-                  onClick={() => handleRestartTab(activeTabId)}
-                >
-                  <RotateCw size={13} />
-                  {t("terminal.restart")}
-                </button>
-              </div>
-            )}
-          </>
+        {/* File viewer — shown when a file is open */}
+        {openFilePath && (
+          <div style={{ width: "100%", height: "100%", display: activeTab === "file" ? "block" : "none" }}>
+            <FileViewer />
+          </div>
         )}
+
+        {/* Terminal tabs — always mounted, visibility controlled by CSS */}
+        <div style={{ width: "100%", height: "100%", display: activeTab === "terminal" ? "block" : "none" }}>
+          {tabs.map((tab) => (
+            <Terminal
+              key={tab.id}
+              projectPath={projectPath}
+              onAliveChange={(alive) => handleAliveChange(tab.id, alive)}
+              visible={activeTabId === tab.id && activeTab === "terminal"}
+            />
+          ))}
+
+          {/* Exited overlay for active tab */}
+          {activeTab === "terminal" && tabs.find((t) => t.id === activeTabId && !t.alive) && (
+            <div className="terminal-exited-overlay">
+              <span>{t("terminal.exited")}</span>
+              <button
+                className="btn btn--primary btn--sm"
+                onClick={() => handleRestartTab(activeTabId)}
+              >
+                <RotateCw size={13} />
+                {t("terminal.restart")}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

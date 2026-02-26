@@ -310,3 +310,9 @@ export const killTerminal = (sessionId: string) =>
 
 export const terminalCd = (sessionId: string, path: string) =>
   invoke<void>("terminal_cd", { sessionId, path });
+
+export const warmupTerminal = (initialDir?: string) =>
+  invoke<void>("warmup_terminal", { initialDir });
+
+export const claimWarmupTerminal = (initialDir?: string, rows?: number, cols?: number) =>
+  invoke<[string, string] | null>("claim_warmup_terminal", { initialDir, rows, cols });

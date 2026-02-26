@@ -21,7 +21,11 @@ pub fn run() {
             app.manage(app_state);
             app.manage(commands::terminal_commands::TerminalState {
                 sessions: std::sync::Mutex::new(std::collections::HashMap::new()),
+                warmup: std::sync::Mutex::new(None),
             });
+
+            // Clean up leftover temp files from previous sessions (once at startup)
+            terminal::TerminalSession::cleanup_stale_temp_files();
 
             // Set the app icon for the main window (visible in Dock / taskbar during dev)
             if let Some(window) = app.get_webview_window("main") {
@@ -109,6 +113,8 @@ pub fn run() {
             commands::terminal_commands::resize_terminal,
             commands::terminal_commands::kill_terminal,
             commands::terminal_commands::terminal_cd,
+            commands::terminal_commands::warmup_terminal,
+            commands::terminal_commands::claim_warmup_terminal,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

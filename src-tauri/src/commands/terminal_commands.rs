@@ -6,6 +6,7 @@ use tauri::{AppHandle, State};
 
 pub struct TerminalState {
     pub sessions: Mutex<HashMap<String, TerminalSession>>,
+    pub warmup: Mutex<Option<TerminalSession>>,
 }
 
 #[tauri::command]
@@ -96,6 +97,79 @@ pub fn terminal_cd(
             .map_err(|e| AppError::General(e))?;
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn warmup_terminal(
+    app: AppHandle,
+    state: State<TerminalState>,
+    initial_dir: Option<String>,
+) -> AppResult<()> {
+    // Skip if a warmup session already exists
+    let has_warmup = state
+        .warmup
+        .lock()
+        .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?
+        .is_some();
+    if has_warmup {
+        return Ok(());
+    }
+
+    // Spawn a new session with default size (will be resized on claim)
+    let session =
+        TerminalSession::spawn(app, initial_dir.as_deref(), 24, 80).map_err(AppError::General)?;
+
+    let mut warmup = state
+        .warmup
+        .lock()
+        .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
+    *warmup = Some(session);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn claim_warmup_terminal(
+    state: State<TerminalState>,
+    initial_dir: Option<String>,
+    rows: Option<u16>,
+    cols: Option<u16>,
+) -> AppResult<Option<(String, String)>> {
+    // Take the warmup session out of the pool
+    let session = {
+        let mut warmup = state
+            .warmup
+            .lock()
+            .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
+        warmup.take()
+    };
+
+    let session = match session {
+        Some(s) => s,
+        None => return Ok(None),
+    };
+
+    // Resize to the caller's dimensions
+    let r = rows.unwrap_or(24);
+    let c = cols.unwrap_or(80);
+    session.resize(r, c).map_err(AppError::General)?;
+
+    // cd to the requested directory (if different from warmup dir)
+    if let Some(ref dir) = initial_dir {
+        let cmd = build_cd_command(&session.shell_name, dir);
+        session.write(&cmd).map_err(AppError::General)?;
+    }
+
+    let session_id = session.id.clone();
+    let shell_name = session.shell_name.clone();
+
+    // Move into active sessions
+    let mut sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
+    sessions.insert(session_id.clone(), session);
+
+    Ok(Some((session_id, shell_name)))
 }
 
 /// Build a cd + clear command appropriate for the given shell.
