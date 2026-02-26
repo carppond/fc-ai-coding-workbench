@@ -10,7 +10,11 @@ interface GitDiffViewProps {
 }
 
 export function GitDiffView({ onSendToAI }: GitDiffViewProps) {
-  const { diffText, diffStagedText, selectedFile, selectedFileDiff, clearSelectedFile } = useGitStore();
+  const diffText = useGitStore((s) => s.diffText);
+  const diffStagedText = useGitStore((s) => s.diffStagedText);
+  const selectedFile = useGitStore((s) => s.selectedFile);
+  const selectedFileDiff = useGitStore((s) => s.selectedFileDiff);
+  const clearSelectedFile = useGitStore((s) => s.clearSelectedFile);
   const { t } = useI18n();
   const [tab, setTab] = useState<"workdir" | "staged">("workdir");
 

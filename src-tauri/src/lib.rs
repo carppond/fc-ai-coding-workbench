@@ -72,6 +72,7 @@ pub fn run() {
             commands::provider_commands::send_message,
             commands::provider_commands::stop_streaming,
             commands::provider_commands::test_api_key,
+            commands::provider_commands::generate_commit_message,
             // Git commands
             commands::git_commands::git_status,
             commands::git_commands::git_diff,

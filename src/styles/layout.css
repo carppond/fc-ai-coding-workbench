@@ -1167,15 +1167,47 @@
   flex-shrink: 0;
 }
 
+.git-actions__input-wrapper {
+  position: relative;
+  margin-bottom: 10px;
+}
+
+.git-actions__ai-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.git-actions__ai-btn:hover:not(:disabled) {
+  color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.git-actions__ai-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
 .git-actions__input {
   width: 100%;
-  padding: 8px 12px;
+  padding: 8px 34px 8px 12px;
   border-radius: var(--radius-sm);
   background: var(--bg-surface);
   border: 1px solid var(--border);
   color: var(--text-primary);
   font-size: 13px;
-  margin-bottom: 10px;
   resize: vertical;
   min-height: 38px;
   max-height: 120px;
@@ -1536,6 +1568,153 @@
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-bottom: 12px;
+}
+
+/* ========================================
+   Guide Modal
+   ======================================== */
+.guide-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: env-fade-in 0.15s ease-out;
+}
+
+.guide-dialog {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  width: 620px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-lg);
+}
+
+.guide-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.guide-dialog__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.guide-dialog__body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.guide-section {
+  margin-bottom: 24px;
+}
+
+.guide-section:last-child {
+  margin-bottom: 0;
+}
+
+.guide-section__title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent);
+  margin: 0 0 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.guide-section__subtitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 14px 0 6px;
+}
+
+.guide-section p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 4px 0 8px;
+  line-height: 1.5;
+}
+
+.guide-pre {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  overflow-x: auto;
+  margin: 6px 0 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.guide-code {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.guide-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin: 8px 0;
+}
+
+.guide-table th,
+.guide-table td {
+  padding: 8px 10px;
+  text-align: left;
+  border: 1px solid var(--border);
+}
+
+.guide-table th {
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.guide-table td {
+  color: var(--text-secondary);
+}
+
+.guide-table tr:hover td {
+  background: var(--bg-hover);
+}
+
+.guide-tip {
+  background: var(--accent-dim, rgba(var(--accent-rgb, 138, 180, 248), 0.08));
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+}
+
+.guide-tip p {
+  color: var(--text-primary) !important;
+  font-weight: 500;
+  margin: 4px 0 0 !important;
 }
 
 /* ========================================

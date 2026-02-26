@@ -108,6 +108,9 @@ const translations: Record<Locale, Record<string, string>> = {
     "git.initRemoteWarning": "如果远程仓库已有提交历史，直接推送可能会失败",
     "git.invalidUrl": "请输入有效的 Git 远程 URL",
     "git.truncated": "{count}+ 个文件 — 列表已截断",
+    "git.generateCommit": "AI 生成",
+    "git.noStagedForAI": "没有暂存的更改",
+    "git.generating": "正在生成...",
 
     // TopBar - Theme
     "topbar.switchTheme": "切换主题",
@@ -220,6 +223,9 @@ const translations: Record<Locale, Record<string, string>> = {
     "fileViewer.tooLarge": "文件过大，仅显示前 {lines} 行",
     "fileViewer.line": "行",
 
+    // Guide
+    "guide.title": "记忆指南",
+
     // Loading
     "loading": "加载中...",
 
@@ -323,6 +329,9 @@ const translations: Record<Locale, Record<string, string>> = {
     "git.initRemoteWarning": "If the remote has existing history, direct push may fail",
     "git.invalidUrl": "Please enter a valid Git remote URL",
     "git.truncated": "{count}+ files — list truncated",
+    "git.generateCommit": "AI Generate",
+    "git.noStagedForAI": "No staged changes",
+    "git.generating": "Generating...",
 
     // TopBar - Theme
     "topbar.switchTheme": "Switch Theme",
@@ -434,6 +443,9 @@ const translations: Record<Locale, Record<string, string>> = {
     "fileViewer.close": "Close File",
     "fileViewer.tooLarge": "File too large, showing first {lines} lines",
     "fileViewer.line": "Line",
+
+    // Guide
+    "guide.title": "Memory Guide",
 
     // Loading
     "loading": "Loading...",

@@ -1,6 +1,7 @@
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
+use std::sync::mpsc as std_mpsc;
 use tauri::Emitter;
 
 /// Find the last valid UTF-8 boundary in a byte slice.
@@ -51,7 +52,7 @@ fn find_utf8_boundary(bytes: &[u8]) -> (usize, usize) {
 }
 
 pub struct TerminalSession {
-    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    write_tx: std_mpsc::Sender<String>,
     master: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
     child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,
     alive: Arc<std::sync::atomic::AtomicBool>,
@@ -333,10 +334,18 @@ impl TerminalSession {
             }
         });
 
-        let writer = Arc::new(Mutex::new(writer));
+        // Writer channel + dedicated writer thread — zero-contention path for input
+        let (write_tx, write_rx) = std_mpsc::channel::<String>();
+        std::thread::spawn(move || {
+            let mut writer = writer;
+            for data in write_rx {
+                let _ = writer.write_all(data.as_bytes());
+                let _ = writer.flush();
+            }
+        });
 
         Ok(Self {
-            writer,
+            write_tx,
             master: Arc::new(Mutex::new(pair.master)),
             child: Arc::new(Mutex::new(child)),
             alive,
@@ -346,16 +355,9 @@ impl TerminalSession {
     }
 
     pub fn write(&self, data: &str) -> Result<(), String> {
-        let mut writer = self.writer.lock().map_err(|_| "Writer lock poisoned".to_string())?;
-        writer
-            .write_all(data.as_bytes())
-            .map_err(|e| format!("Write error: {}", e))?;
-        Ok(())
-    }
-
-    /// Return a clone of the writer Arc for direct access (avoids locking sessions HashMap).
-    pub fn writer(&self) -> Arc<Mutex<Box<dyn Write + Send>>> {
-        Arc::clone(&self.writer)
+        self.write_tx
+            .send(data.to_string())
+            .map_err(|_| "Write channel closed".to_string())
     }
 
     pub fn resize(&self, rows: u16, cols: u16) -> Result<(), String> {

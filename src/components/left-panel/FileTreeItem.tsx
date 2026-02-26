@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, memo } from "react";
 import { ChevronRight, ChevronDown, Folder, FileText, Loader } from "lucide-react";
 import type { DirEntry } from "../../lib/types";
 import { useFileStore } from "../../stores/fileStore";
@@ -21,8 +21,12 @@ interface ContextMenuState {
 // Shared context menu state - only one menu open at a time
 let globalCloseMenu: (() => void) | null = null;
 
-export function FileTreeItem({ entry, depth, defaultExpanded }: FileTreeItemProps) {
-  const { expandedPaths, toggleExpand, loadingPaths, openFile, refreshParent } = useFileStore();
+export const FileTreeItem = memo(function FileTreeItem({ entry, depth, defaultExpanded }: FileTreeItemProps) {
+  const expandedPaths = useFileStore((s) => s.expandedPaths);
+  const toggleExpand = useFileStore((s) => s.toggleExpand);
+  const loadingPaths = useFileStore((s) => s.loadingPaths);
+  const openFile = useFileStore((s) => s.openFile);
+  const refreshParent = useFileStore((s) => s.refreshParent);
   const { t } = useI18n();
   const { confirm } = useConfirm();
   const isExpanded = expandedPaths.has(entry.path);
@@ -264,4 +268,4 @@ export function FileTreeItem({ entry, depth, defaultExpanded }: FileTreeItemProp
       )}
     </>
   );
-}
+});

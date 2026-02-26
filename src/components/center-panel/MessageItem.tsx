@@ -1,7 +1,7 @@
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import { Copy, Check } from "lucide-react";
-import { useState, useCallback } from "react";
+import { useState, useCallback, memo } from "react";
 import type { Message } from "../../lib/types";
 import { useI18n } from "../../lib/i18n";
 
@@ -44,7 +44,7 @@ function CodeBlock({
   );
 }
 
-export function MessageItem({ message }: MessageItemProps) {
+export const MessageItem = memo(function MessageItem({ message }: MessageItemProps) {
   const { t } = useI18n();
   const time = new Date(message.created_at).toLocaleTimeString([], {
     hour: "2-digit",
@@ -100,4 +100,4 @@ export function MessageItem({ message }: MessageItemProps) {
       </div>
     </div>
   );
-}
+});

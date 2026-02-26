@@ -26,10 +26,12 @@ interface GitState {
   loading: boolean;
   operating: boolean;
   operationType: "commit" | "pull" | "push" | null;
+  generating: boolean;
   error: string | null;
   isGitRepo: boolean;
 
   refresh: (projectPath: string) => Promise<void>;
+  refreshLite: (projectPath: string) => Promise<void>;
   loadLog: (projectPath: string) => Promise<void>;
   loadDiff: (projectPath: string) => Promise<void>;
   loadDiffStaged: (projectPath: string) => Promise<void>;
@@ -45,6 +47,7 @@ interface GitState {
   commit: (projectPath: string) => Promise<boolean>;
   pull: (projectPath: string) => Promise<boolean>;
   push: (projectPath: string) => Promise<boolean>;
+  generateCommitMessage: (projectPath: string, provider: string, model: string, baseUrl?: string) => Promise<boolean>;
   setCommitMessage: (msg: string) => void;
   clearError: () => void;
   reset: () => void;
@@ -65,6 +68,7 @@ export const useGitStore = create<GitState>((set, get) => ({
   loading: false,
   operating: false,
   operationType: null,
+  generating: false,
   error: null,
   isGitRepo: false,
 
@@ -144,6 +148,30 @@ export const useGitStore = create<GitState>((set, get) => ({
         set({ selectedFile: null, selectedFileDiff: "" });
       }
     }
+  },
+
+  refreshLite: async (projectPath) => {
+    // Lightweight refresh: only status + branchInfo (skip diff/log)
+    if (get().operating) return;
+
+    let statuses: GitFileStatus[] = [];
+    let branch: GitBranchInfo | null = null;
+    let isGitRepo = false;
+
+    try {
+      statuses = await ipc.gitStatus(projectPath);
+      isGitRepo = true;
+    } catch {
+      // Not a git repo or other error
+    }
+
+    try {
+      branch = await ipc.gitBranchInfo(projectPath);
+    } catch {
+      if (isGitRepo) branch = get().branchInfo;
+    }
+
+    set({ fileStatuses: statuses, branchInfo: branch, isGitRepo });
   },
 
   loadLog: async (projectPath) => {
@@ -337,6 +365,19 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
   },
 
+  generateCommitMessage: async (projectPath, provider, model, baseUrl) => {
+    if (get().generating) return false;
+    set({ generating: true, error: null });
+    try {
+      const msg = await ipc.generateCommitMessage(projectPath, provider, model, baseUrl);
+      set({ commitMessage: msg, generating: false });
+      return true;
+    } catch (e: unknown) {
+      set({ error: extractErrorMessage(e), generating: false });
+      return false;
+    }
+  },
+
   setCommitMessage: (msg) => set({ commitMessage: msg }),
   clearError: () => set({ error: null }),
   reset: () => {
@@ -352,6 +393,7 @@ export const useGitStore = create<GitState>((set, get) => ({
       loading: false,
       operating: false,
       operationType: null,
+      generating: false,
       error: null,
       isGitRepo: false,
     });

@@ -136,6 +136,58 @@ pub async fn stream_chat(
     Ok(())
 }
 
+pub async fn generate_text(
+    client: &reqwest::Client,
+    api_key: &str,
+    base_url: &str,
+    model: &str,
+    system_prompt: &str,
+    user_message: &str,
+) -> AppResult<String> {
+    let body = serde_json::json!({
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message},
+        ],
+        "temperature": 0.3,
+    });
+
+    let url = format!("{}/chat/completions", base_url);
+    let response = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| AppError::Provider(e.to_string()))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(AppError::Provider(format!(
+            "API error {}: {}",
+            status, text
+        )));
+    }
+
+    let json: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| AppError::Provider(e.to_string()))?;
+
+    let text = json["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or("")
+        .to_string();
+
+    Ok(text)
+}
+
 pub async fn test_connection(
     client: &reqwest::Client,
     api_key: &str,

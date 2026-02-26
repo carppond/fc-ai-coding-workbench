@@ -10,10 +10,14 @@ import { ContextInjectBar } from "./ContextInjectBar";
 export function Composer() {
   const [input, setInput] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { status, sendMessage, stopStreaming } = useChatStore();
-  const { activeThread } = useSessionStore();
-  const { activeProvider, activeModel, activeMode, providers } =
-    useSettingsStore();
+  const status = useChatStore((s) => s.status);
+  const sendMessage = useChatStore((s) => s.sendMessage);
+  const stopStreaming = useChatStore((s) => s.stopStreaming);
+  const activeThread = useSessionStore((s) => s.activeThread);
+  const activeProvider = useSettingsStore((s) => s.activeProvider);
+  const activeModel = useSettingsStore((s) => s.activeModel);
+  const activeMode = useSettingsStore((s) => s.activeMode);
+  const providers = useSettingsStore((s) => s.providers);
   const { t } = useI18n();
 
   const isStreaming = status === "streaming" || status === "sending";

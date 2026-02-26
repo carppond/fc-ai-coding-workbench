@@ -1,15 +1,27 @@
 import { useEffect, useRef } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, Sparkles } from "lucide-react";
 import { useGitStore } from "../../stores/gitStore";
 import { useProjectStore } from "../../stores/projectStore";
+import { useSettingsStore } from "../../stores/settingsStore";
 import { useI18n } from "../../lib/i18n";
 import { useToast } from "../common/Toast";
 import { useConfirm } from "../common/ConfirmDialog";
 
 export function GitActions() {
-  const { commitMessage, setCommitMessage, commit, pull, push, operating, operationType, error, clearError, fileStatuses } =
-    useGitStore();
-  const { activeProject } = useProjectStore();
+  const commitMessage = useGitStore((s) => s.commitMessage);
+  const setCommitMessage = useGitStore((s) => s.setCommitMessage);
+  const commit = useGitStore((s) => s.commit);
+  const pull = useGitStore((s) => s.pull);
+  const push = useGitStore((s) => s.push);
+  const operating = useGitStore((s) => s.operating);
+  const operationType = useGitStore((s) => s.operationType);
+  const generating = useGitStore((s) => s.generating);
+  const genCommitMsg = useGitStore((s) => s.generateCommitMessage);
+  const error = useGitStore((s) => s.error);
+  const clearError = useGitStore((s) => s.clearError);
+  const fileStatuses = useGitStore((s) => s.fileStatuses);
+  const activeProject = useProjectStore((s) => s.activeProject);
+  const { activeProvider, activeModel, providers } = useSettingsStore();
   const { t } = useI18n();
   const { toast } = useToast();
   const { confirm } = useConfirm();
@@ -57,6 +69,16 @@ export function GitActions() {
     if (ok) toast(t("git.pullSuccess"), "success");
   };
 
+  const handleGenerate = async () => {
+    if (!activeProject || !hasStagedFiles) return;
+    const currentProvider = providers.find((p) => p.id === activeProvider);
+    const baseUrl = currentProvider?.baseUrl;
+    const ok = await genCommitMsg(activeProject.path, activeProvider, activeModel, baseUrl || undefined);
+    if (!ok) {
+      toast(t("git.noStagedForAI"), "error");
+    }
+  };
+
   const handlePush = async () => {
     if (!activeProject) return;
     const msg = hasUncommitted
@@ -69,19 +91,29 @@ export function GitActions() {
 
   return (
     <div className="git-actions">
-      <textarea
-        className="git-actions__input"
-        placeholder={t("git.commitMessage")}
-        value={commitMessage}
-        rows={2}
-        onChange={(e) => setCommitMessage(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault();
-            handleCommit();
-          }
-        }}
-      />
+      <div className="git-actions__input-wrapper">
+        <textarea
+          className="git-actions__input"
+          placeholder={t("git.commitMessage")}
+          value={commitMessage}
+          rows={2}
+          onChange={(e) => setCommitMessage(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              handleCommit();
+            }
+          }}
+        />
+        <button
+          className="git-actions__ai-btn"
+          onClick={handleGenerate}
+          disabled={!hasStagedFiles || generating || operating}
+          title={t("git.generateCommit")}
+        >
+          {generating ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />}
+        </button>
+      </div>
       <div className="git-actions__buttons">
         <button
           className="btn btn--primary btn--sm"

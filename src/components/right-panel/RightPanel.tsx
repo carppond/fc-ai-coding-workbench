@@ -21,8 +21,9 @@ function isValidGitUrl(url: string): boolean {
 }
 
 function GitInitForm() {
-  const { activeProject } = useProjectStore();
-  const { initRepo, operating } = useGitStore();
+  const activeProject = useProjectStore((s) => s.activeProject);
+  const initRepo = useGitStore((s) => s.initRepo);
+  const operating = useGitStore((s) => s.operating);
   const { t } = useI18n();
   const { toast } = useToast();
 
@@ -123,12 +124,15 @@ function GitInitForm() {
   );
 }
 
-const POLL_INTERVAL = 5000;
+const POLL_INTERVAL = 10000;
 const MAX_BACKOFF = 30000;
 
 export function RightPanel() {
-  const { activeProject } = useProjectStore();
-  const { isGitRepo, refresh, reset } = useGitStore();
+  const activeProject = useProjectStore((s) => s.activeProject);
+  const isGitRepo = useGitStore((s) => s.isGitRepo);
+  const refresh = useGitStore((s) => s.refresh);
+  const refreshLite = useGitStore((s) => s.refreshLite);
+  const reset = useGitStore((s) => s.reset);
   const { t } = useI18n();
   const failCountRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -142,6 +146,7 @@ export function RightPanel() {
   }, [activeProject]);
 
   // Smart polling: pause when unfocused, exponential backoff on failure
+  // Uses refreshLite (status + branchInfo only) to reduce I/O pressure
   const scheduleNext = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
     if (!activeProject || !focusedRef.current) return;
@@ -151,14 +156,14 @@ export function RightPanel() {
     timerRef.current = setTimeout(async () => {
       if (!activeProject || !focusedRef.current) return;
       try {
-        await refresh(activeProject.path);
+        await refreshLite(activeProject.path);
         failCountRef.current = 0;
       } catch {
         failCountRef.current = Math.min(failCountRef.current + 1, 5);
       }
       scheduleNext();
     }, backoff);
-  }, [activeProject, refresh]);
+  }, [activeProject, refreshLite]);
 
   useEffect(() => {
     if (!activeProject) return;

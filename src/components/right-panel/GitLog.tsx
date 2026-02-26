@@ -25,7 +25,7 @@ function relativeTime(ts: number, locale: string): string {
 }
 
 export function GitLog() {
-  const { logEntries } = useGitStore();
+  const logEntries = useGitStore((s) => s.logEntries);
   const { t, locale } = useI18n();
 
   return (

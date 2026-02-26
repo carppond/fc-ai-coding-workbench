@@ -463,11 +463,24 @@ export const Terminal = memo(function Terminal({ projectPath, onAliveChange, vis
   // Re-fit when visibility changes (tab switch) and flush buffered output
   useEffect(() => {
     if (visible) {
-      // Flush any output that was buffered while hidden
+      // Flush buffered output in chunks to avoid UI freeze on large buffers
       if (xtermRef.current && outputBufferRef.current.length > 0) {
-        const buffered = outputBufferRef.current.join("");
+        const buffer = outputBufferRef.current;
         outputBufferRef.current = [];
-        xtermRef.current.write(buffered);
+        const CHUNK_SIZE = 100;
+        const term = xtermRef.current;
+        let offset = 0;
+        const flushChunk = () => {
+          const chunk = buffer.slice(offset, offset + CHUNK_SIZE);
+          if (chunk.length > 0) {
+            term.write(chunk.join(""));
+            offset += CHUNK_SIZE;
+            if (offset < buffer.length) {
+              requestAnimationFrame(flushChunk);
+            }
+          }
+        };
+        flushChunk();
       }
       if (fitAddonRef.current) {
         try {
@@ -625,10 +638,23 @@ export const Terminal = memo(function Terminal({ projectPath, onAliveChange, vis
     };
     container.addEventListener("contextmenu", handleContextMenu);
 
-    // Send user keyboard input to PTY
+    // Send user keyboard input to PTY — batched via microtask to coalesce
+    // rapid-fire events (IME composition, Shift+key combos) into fewer IPC calls.
+    let pendingWrite = "";
+    let flushQueued = false;
     term.onData((data) => {
-      if (sessionIdRef.current) {
-        ipc.writeTerminal(sessionIdRef.current, data);
+      if (!sessionIdRef.current) return;
+      pendingWrite += data;
+      if (!flushQueued) {
+        flushQueued = true;
+        queueMicrotask(() => {
+          flushQueued = false;
+          const batch = pendingWrite;
+          pendingWrite = "";
+          if (batch && sessionIdRef.current) {
+            ipc.writeTerminal(sessionIdRef.current, batch);
+          }
+        });
       }
     });
 
@@ -731,6 +757,8 @@ export const Terminal = memo(function Terminal({ projectPath, onAliveChange, vis
       }
     };
     const onResize = () => {
+      // Skip resize when terminal is hidden — no point fitting an invisible container
+      if (!visibleRef.current) return;
       // Fit immediately so characters never appear stretched
       safeFit();
       // Debounce PTY resize: only notify after resize settles, so CLI apps

@@ -34,27 +34,17 @@ pub fn spawn_terminal(
 }
 
 #[tauri::command]
-pub async fn write_terminal(
-    state: State<'_, TerminalState>,
+pub fn write_terminal(
+    state: State<TerminalState>,
     session_id: String,
     data: String,
 ) -> AppResult<()> {
-    // Clone the writer Arc so we can write on a blocking thread without holding the sessions lock
-    let writer = {
-        let sessions = state
-            .sessions
-            .lock()
-            .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
-        sessions.get(&session_id).map(|s| s.writer())
-    };
-    if let Some(writer) = writer {
-        tauri::async_runtime::spawn_blocking(move || {
-            let mut w = writer.lock().map_err(|_| AppError::General("Writer lock poisoned".to_string()))?;
-            w.write_all(data.as_bytes()).map_err(|e| AppError::General(format!("Write error: {}", e)))?;
-            Ok::<(), AppError>(())
-        })
-        .await
-        .map_err(|e| AppError::General(format!("Task join error: {}", e)))??;
+    let sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
+    if let Some(session) = sessions.get(&session_id) {
+        session.write(&data).map_err(AppError::General)?;
     }
     Ok(())
 }

@@ -9,8 +9,15 @@ const VISIBLE_LIMIT = 100;
 const MAX_STATUS_ENTRIES = 500;
 
 export function GitStatusList() {
-  const { fileStatuses, selectedFile, selectFile, stageFile, unstageFile, stageAll, unstageAll, discardFile } = useGitStore();
-  const { activeProject } = useProjectStore();
+  const fileStatuses = useGitStore((s) => s.fileStatuses);
+  const selectedFile = useGitStore((s) => s.selectedFile);
+  const selectFile = useGitStore((s) => s.selectFile);
+  const stageFile = useGitStore((s) => s.stageFile);
+  const unstageFile = useGitStore((s) => s.unstageFile);
+  const stageAll = useGitStore((s) => s.stageAll);
+  const unstageAll = useGitStore((s) => s.unstageAll);
+  const discardFile = useGitStore((s) => s.discardFile);
+  const activeProject = useProjectStore((s) => s.activeProject);
   const { t } = useI18n();
   const { confirm } = useConfirm();
 

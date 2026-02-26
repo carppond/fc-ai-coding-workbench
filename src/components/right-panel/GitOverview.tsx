@@ -4,8 +4,11 @@ import { useProjectStore } from "../../stores/projectStore";
 import { useI18n } from "../../lib/i18n";
 
 export function GitOverview() {
-  const { branchInfo, loading, refresh, isGitRepo } = useGitStore();
-  const { activeProject } = useProjectStore();
+  const branchInfo = useGitStore((s) => s.branchInfo);
+  const loading = useGitStore((s) => s.loading);
+  const refresh = useGitStore((s) => s.refresh);
+  const isGitRepo = useGitStore((s) => s.isGitRepo);
+  const activeProject = useProjectStore((s) => s.activeProject);
   const { t } = useI18n();
 
   const handleRefresh = () => {

@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
-import { FolderOpen, Globe, Palette, Settings, X, Info } from "lucide-react";
+import { FolderOpen, Globe, Palette, Settings, X, Info, BookOpen } from "lucide-react";
 import { useProjectStore } from "../../stores/projectStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useI18n } from "../../lib/i18n";
 import { EnvironmentSetup } from "../common/EnvironmentSetup";
+import { GuideModal } from "../common/GuideModal";
 import * as ipc from "../../ipc/commands";
 
 function ProxySettings() {
@@ -164,6 +165,7 @@ export function TopBar() {
   const { loading, theme, cycleTheme, envCache } = useSettingsStore();
   const { t, toggleLocale, locale } = useI18n();
   const [showSettings, setShowSettings] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
 
   if (loading) return null;
 
@@ -202,6 +204,15 @@ export function TopBar() {
 
         <button
           className="top-bar__btn"
+          onClick={() => setShowGuide(true)}
+          title={t("guide.title")}
+          style={{ fontSize: 13, fontWeight: 500, minWidth: 32 }}
+        >
+          <BookOpen size={16} color="var(--text-secondary)" />
+        </button>
+
+        <button
+          className="top-bar__btn"
           onClick={() => setShowSettings(true)}
           title={t("settings.title")}
           style={{ fontSize: 13, fontWeight: 500, minWidth: 32 }}
@@ -209,6 +220,8 @@ export function TopBar() {
           <Settings size={16} color="var(--text-secondary)" />
         </button>
       </div>
+
+      <GuideModal open={showGuide} onClose={() => setShowGuide(false)} />
 
       {/* Settings Dialog */}
       {showSettings && (
