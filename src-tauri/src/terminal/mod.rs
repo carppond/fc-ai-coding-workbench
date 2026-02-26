@@ -196,41 +196,43 @@ impl TerminalSession {
         let output_event = format!("terminal-output-{}", session_id);
         let exit_event = format!("terminal-exit-{}", session_id);
 
-        // Spawn reader thread — emits per-session terminal-output events
+        // Channel for reader → coalescer communication (None = exit signal)
+        let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
+
+        // Reader thread — reads from PTY, processes UTF-8, sends to coalescer
         std::thread::spawn(move || {
             let mut reader = reader;
             let mut buf = [0u8; 4096];
-            let mut remainder_buf = [0u8; 4]; // UTF-8 max char = 4 bytes, no heap alloc
+            let mut remainder_buf = [0u8; 4];
             let mut remainder_len: usize = 0;
             let mut initial_phase = true;
             let mut chunks_seen = 0u32;
-            // Temp buffer for prepending remainder to new data
             let mut combined = [0u8; 4 + 4096];
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => {
-                        alive_clone.store(false, std::sync::atomic::Ordering::Relaxed);
-                        let _ = app.emit(&exit_event, &exit_session_id);
+                        let _ = tx.send(None);
                         break;
                     }
                     Ok(n) => {
-                        // Prepend any leftover bytes from the previous read
                         let bytes = if remainder_len == 0 {
                             &buf[..n]
                         } else {
-                            combined[..remainder_len].copy_from_slice(&remainder_buf[..remainder_len]);
-                            combined[remainder_len..remainder_len + n].copy_from_slice(&buf[..n]);
+                            combined[..remainder_len]
+                                .copy_from_slice(&remainder_buf[..remainder_len]);
+                            combined[remainder_len..remainder_len + n]
+                                .copy_from_slice(&buf[..n]);
                             &combined[..remainder_len + n]
                         };
 
-                        // Find the last valid UTF-8 boundary
                         let (valid_len, leftover) = find_utf8_boundary(bytes);
-                        let data = String::from_utf8_lossy(&bytes[..valid_len]).into_owned();
+                        let data =
+                            String::from_utf8_lossy(&bytes[..valid_len]).into_owned();
 
-                        // Store incomplete bytes for next read (max 3 bytes)
                         if leftover > 0 {
                             let start = bytes.len() - leftover;
-                            remainder_buf[..leftover].copy_from_slice(&bytes[start..]);
+                            remainder_buf[..leftover]
+                                .copy_from_slice(&bytes[start..]);
                             remainder_len = leftover;
                         } else {
                             remainder_len = 0;
@@ -240,6 +242,7 @@ impl TerminalSession {
                             continue;
                         }
 
+                        // Initial phase: filter "Last login:" lines
                         if initial_phase {
                             chunks_seen += 1;
                             if chunks_seen > 5 {
@@ -257,20 +260,75 @@ impl TerminalSession {
                                     .collect::<Vec<_>>()
                                     .join("\n");
                                 if !filtered.trim().is_empty() {
-                                    let _ = app.emit(&output_event, &filtered);
+                                    let _ = tx.send(Some(filtered));
                                 }
                             } else if !data.trim().is_empty() {
-                                let _ = app.emit(&output_event, &data);
+                                let _ = tx.send(Some(data));
                             }
                         } else {
-                            let _ = app.emit(&output_event, &data);
+                            let _ = tx.send(Some(data));
                         }
                     }
                     Err(_) => {
-                        alive_clone.store(false, std::sync::atomic::Ordering::Relaxed);
-                        let _ = app.emit(&exit_event, &exit_session_id);
+                        let _ = tx.send(None);
                         break;
                     }
+                }
+            }
+        });
+
+        // Coalescer thread — batches output with a 2ms window to reduce IPC events
+        std::thread::spawn(move || {
+            use std::sync::mpsc::RecvTimeoutError;
+            use std::time::{Duration, Instant};
+            let coalesce = Duration::from_millis(2);
+
+            loop {
+                match rx.recv() {
+                    Ok(Some(data)) => {
+                        let mut batch = data;
+                        let deadline = Instant::now() + coalesce;
+                        loop {
+                            let remaining =
+                                deadline.saturating_duration_since(Instant::now());
+                            if remaining.is_zero() {
+                                break;
+                            }
+                            match rx.recv_timeout(remaining) {
+                                Ok(Some(more)) => batch.push_str(&more),
+                                Ok(None) => {
+                                    // Exit — flush remaining data first
+                                    if !batch.is_empty() {
+                                        let _ = app.emit(&output_event, &batch);
+                                    }
+                                    alive_clone.store(
+                                        false,
+                                        std::sync::atomic::Ordering::Relaxed,
+                                    );
+                                    let _ =
+                                        app.emit(&exit_event, &exit_session_id);
+                                    return;
+                                }
+                                Err(RecvTimeoutError::Timeout) => break,
+                                Err(RecvTimeoutError::Disconnected) => {
+                                    if !batch.is_empty() {
+                                        let _ = app.emit(&output_event, &batch);
+                                    }
+                                    return;
+                                }
+                            }
+                        }
+                        if !batch.is_empty() {
+                            let _ = app.emit(&output_event, &batch);
+                        }
+                    }
+                    Ok(None) => {
+                        alive_clone
+                            .store(false, std::sync::atomic::Ordering::Relaxed);
+                        let _ = app.emit(&exit_event, &exit_session_id);
+                        return;
+                    }
+                    Err(_) => return,
                 }
             }
         });
@@ -292,8 +350,12 @@ impl TerminalSession {
         writer
             .write_all(data.as_bytes())
             .map_err(|e| format!("Write error: {}", e))?;
-        writer.flush().map_err(|e| format!("Flush error: {}", e))?;
         Ok(())
+    }
+
+    /// Return a clone of the writer Arc for direct access (avoids locking sessions HashMap).
+    pub fn writer(&self) -> Arc<Mutex<Box<dyn Write + Send>>> {
+        Arc::clone(&self.writer)
     }
 
     pub fn resize(&self, rows: u16, cols: u16) -> Result<(), String> {

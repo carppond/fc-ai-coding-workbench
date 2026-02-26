@@ -500,12 +500,12 @@ export const Terminal = memo(function Terminal({ projectPath, onAliveChange, vis
       lineHeight: 1.35,
       letterSpacing: 0,
       scrollback: 5000,
-      smoothScrollDuration: 100,
+      smoothScrollDuration: 0,
       theme: TERMINAL_THEMES[currentTheme],
       allowProposedApi: true,
       macOptionIsMeta: true,
       macOptionClickForcesSelection: true,
-      minimumContrastRatio: 2,
+      minimumContrastRatio: 1,
       drawBoldTextInBrightColors: true,
     });
 
