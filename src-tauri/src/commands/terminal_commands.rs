@@ -1,12 +1,12 @@
 use crate::errors::{AppError, AppResult};
 use crate::terminal::TerminalSession;
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, State};
 
 pub struct TerminalState {
     pub sessions: Mutex<HashMap<String, TerminalSession>>,
-    pub warmup: Mutex<Option<TerminalSession>>,
+    pub warmup: Arc<Mutex<Option<TerminalSession>>>,
 }
 
 #[tauri::command]
@@ -100,30 +100,32 @@ pub fn terminal_cd(
 }
 
 #[tauri::command]
-pub fn warmup_terminal(
+pub async fn warmup_terminal(
     app: AppHandle,
-    state: State<TerminalState>,
+    state: State<'_, TerminalState>,
     initial_dir: Option<String>,
 ) -> AppResult<()> {
     // Skip if a warmup session already exists
-    let has_warmup = state
-        .warmup
-        .lock()
-        .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?
-        .is_some();
-    if has_warmup {
-        return Ok(());
+    {
+        let warmup = state
+            .warmup
+            .lock()
+            .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
+        if warmup.is_some() {
+            return Ok(());
+        }
     }
 
-    // Spawn a new session with default size (will be resized on claim)
-    let session =
-        TerminalSession::spawn(app, initial_dir.as_deref(), 24, 80).map_err(AppError::General)?;
+    // Spawn on a background thread so the command returns immediately
+    let warmup_arc = Arc::clone(&state.warmup);
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Ok(session) = TerminalSession::spawn(app, initial_dir.as_deref(), 24, 80) {
+            if let Ok(mut warmup) = warmup_arc.lock() {
+                *warmup = Some(session);
+            }
+        }
+    });
 
-    let mut warmup = state
-        .warmup
-        .lock()
-        .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
-    *warmup = Some(session);
     Ok(())
 }
 
