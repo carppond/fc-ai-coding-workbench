@@ -10,21 +10,44 @@ fn find_utf8_boundary(bytes: &[u8]) -> (usize, usize) {
     if bytes.is_empty() {
         return (0, 0);
     }
-    // If the whole slice is valid UTF-8, return it all
-    if std::str::from_utf8(bytes).is_ok() {
-        return (bytes.len(), 0);
-    }
-    // Walk backwards (up to 4 bytes — max UTF-8 char length) to find
-    // where an incomplete multi-byte sequence starts.
-    let check_len = bytes.len().min(4);
-    for i in 1..=check_len {
-        let pos = bytes.len() - i;
-        if std::str::from_utf8(&bytes[..pos]).is_ok() {
-            return (pos, i);
+    // Fast path: check only the last few bytes for incomplete multi-byte sequences.
+    // A UTF-8 continuation byte starts with 0b10xxxxxx. Walk backwards from the end
+    // to find the start of the last (possibly incomplete) character.
+    let len = bytes.len();
+    let check_start = len.saturating_sub(3); // at most 3 trailing continuation bytes
+    let mut i = len;
+    // Find the leading byte of the last character by scanning backwards
+    while i > check_start {
+        i -= 1;
+        let b = bytes[i];
+        if b & 0x80 == 0 {
+            // ASCII byte — everything is complete
+            return (len, 0);
         }
+        if b & 0xC0 != 0x80 {
+            // Found a leading byte (0b11xxxxxx). Determine expected char length.
+            let char_len = if b & 0xE0 == 0xC0 {
+                2
+            } else if b & 0xF0 == 0xE0 {
+                3
+            } else if b & 0xF8 == 0xF0 {
+                4
+            } else {
+                // Invalid leading byte — treat as complete (lossy)
+                return (len, 0);
+            };
+            let available = len - i;
+            if available >= char_len {
+                // The multi-byte character is complete
+                return (len, 0);
+            }
+            // Incomplete character: split before this leading byte
+            return (i, available);
+        }
+        // continuation byte — keep walking backwards
     }
-    // Fallback: treat everything as valid (lossy)
-    (bytes.len(), 0)
+    // All checked bytes are continuation bytes without a leading byte — treat as complete (lossy)
+    (len, 0)
 }
 
 pub struct TerminalSession {
@@ -33,6 +56,7 @@ pub struct TerminalSession {
     child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,
     alive: Arc<std::sync::atomic::AtomicBool>,
     pub id: String,
+    pub shell_name: String,
 }
 
 impl Drop for TerminalSession {
@@ -40,6 +64,8 @@ impl Drop for TerminalSession {
         self.alive.store(false, std::sync::atomic::Ordering::Relaxed);
         if let Ok(mut child) = self.child.lock() {
             let _ = child.kill();
+            // Wait for the child to exit to prevent zombie processes
+            let _ = child.wait();
         }
     }
 }
@@ -92,8 +118,8 @@ impl TerminalSession {
                 cmd.args(["-NoLogo", "-NoExit"]);
             }
             "cmd" | "cmd.exe" => {
-                // cmd.exe: /K keeps the shell open
-                cmd.arg("/K");
+                // cmd.exe: /K keeps the shell open, chcp 65001 sets UTF-8 code page
+                cmd.args(["/K", "chcp 65001 >nul"]);
             }
             _ => {
                 // zsh, sh, etc: login + interactive
@@ -176,9 +202,12 @@ impl TerminalSession {
         std::thread::spawn(move || {
             let mut reader = reader;
             let mut buf = [0u8; 4096];
-            let mut utf8_remainder: Vec<u8> = Vec::new(); // incomplete UTF-8 bytes from previous read
+            let mut remainder_buf = [0u8; 4]; // UTF-8 max char = 4 bytes, no heap alloc
+            let mut remainder_len: usize = 0;
             let mut initial_phase = true;
             let mut chunks_seen = 0u32;
+            // Temp buffer for prepending remainder to new data
+            let mut combined = [0u8; 4 + 4096];
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => {
@@ -188,24 +217,25 @@ impl TerminalSession {
                     }
                     Ok(n) => {
                         // Prepend any leftover bytes from the previous read
-                        let bytes = if utf8_remainder.is_empty() {
+                        let bytes = if remainder_len == 0 {
                             &buf[..n]
                         } else {
-                            utf8_remainder.extend_from_slice(&buf[..n]);
-                            utf8_remainder.as_slice()
+                            combined[..remainder_len].copy_from_slice(&remainder_buf[..remainder_len]);
+                            combined[remainder_len..remainder_len + n].copy_from_slice(&buf[..n]);
+                            &combined[..remainder_len + n]
                         };
 
                         // Find the last valid UTF-8 boundary
                         let (valid_len, leftover) = find_utf8_boundary(bytes);
                         let data = String::from_utf8_lossy(&bytes[..valid_len]).into_owned();
 
-                        // Store incomplete bytes for next read
+                        // Store incomplete bytes for next read (max 3 bytes)
                         if leftover > 0 {
                             let start = bytes.len() - leftover;
-                            let tail = bytes[start..].to_vec();
-                            utf8_remainder = tail;
+                            remainder_buf[..leftover].copy_from_slice(&bytes[start..]);
+                            remainder_len = leftover;
                         } else {
-                            utf8_remainder.clear();
+                            remainder_len = 0;
                         }
 
                         if data.is_empty() {
@@ -255,11 +285,12 @@ impl TerminalSession {
             child: Arc::new(Mutex::new(child)),
             alive,
             id: session_id,
+            shell_name: shell_name.clone(),
         })
     }
 
     pub fn write(&self, data: &str) -> Result<(), String> {
-        let mut writer = self.writer.lock().unwrap();
+        let mut writer = self.writer.lock().map_err(|_| "Writer lock poisoned".to_string())?;
         writer
             .write_all(data.as_bytes())
             .map_err(|e| format!("Write error: {}", e))?;
@@ -268,7 +299,7 @@ impl TerminalSession {
     }
 
     pub fn resize(&self, rows: u16, cols: u16) -> Result<(), String> {
-        let master = self.master.lock().unwrap();
+        let master = self.master.lock().map_err(|_| "Master lock poisoned".to_string())?;
         master
             .resize(PtySize {
                 rows,

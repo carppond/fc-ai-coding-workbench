@@ -404,6 +404,7 @@ export function Terminal({ projectPath, onAliveChange, visible = true }: Termina
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const spawnedForPath = useRef<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
+  const shellNameRef = useRef<string | null>(null);
   // Track latest projectPath via ref so the spawn timer can read it
   const projectPathRef = useRef(projectPath);
   projectPathRef.current = projectPath;
@@ -529,8 +530,14 @@ export function Terminal({ projectPath, onAliveChange, visible = true }: Termina
     // --- Paste handling (with bracketed paste support for vim/nano) ---
     const bracketedPaste = (text: string) => {
       if (!sessionIdRef.current) return;
-      // Wrap in bracketed paste sequences so editors (vim, nano) handle it correctly
-      ipc.writeTerminal(sessionIdRef.current, `\x1b[200~${text}\x1b[201~`);
+      const shell = shellNameRef.current;
+      // cmd.exe and powershell don't support bracketed paste — send raw text
+      if (shell === "cmd" || shell === "cmd.exe" || shell === "pwsh" || shell === "pwsh.exe" || shell === "powershell" || shell === "powershell.exe") {
+        ipc.writeTerminal(sessionIdRef.current, text);
+      } else {
+        // Wrap in bracketed paste sequences so editors (vim, nano) handle it correctly
+        ipc.writeTerminal(sessionIdRef.current, `\x1b[200~${text}\x1b[201~`);
+      }
     };
 
     const handlePaste = (e: ClipboardEvent) => {
@@ -615,18 +622,19 @@ export function Terminal({ projectPath, onAliveChange, visible = true }: Termina
       try { fitAddon.fit(); } catch { /* container not visible */ }
     };
 
-    // Delay spawn slightly (200ms) to let projectStore finish loading.
+    // Delay spawn slightly to let projectStore finish loading.
     const spawnTimer = setTimeout(() => {
       if (disposed) return;
       safeFit();
       const path = projectPathRef.current;
-      ipc.spawnTerminal(path ?? undefined, term.rows, term.cols).then((sessionId) => {
+      ipc.spawnTerminal(path ?? undefined, term.rows, term.cols).then(([sessionId, shellName]) => {
         if (disposed) {
           // Spawned but component already unmounted — kill it
           ipc.killTerminal(sessionId);
           return;
         }
         sessionIdRef.current = sessionId;
+        shellNameRef.current = shellName;
         spawnedForPath.current = path;
         onAliveChange?.(true);
 
@@ -648,7 +656,7 @@ export function Terminal({ projectPath, onAliveChange, visible = true }: Termina
           unlistenExitFn = fn;
         });
       });
-    }, 200);
+    }, 500);
 
     let unlistenOutputFn: (() => void) | null = null;
     let unlistenExitFn: (() => void) | null = null;
@@ -658,6 +666,7 @@ export function Terminal({ projectPath, onAliveChange, visible = true }: Termina
     let lastCols = term.cols;
     let lastRows = term.rows;
     const notifyPtyResize = () => {
+      if (disposed) return;
       const newCols = term.cols;
       const newRows = term.rows;
       if (newCols !== lastCols || newRows !== lastRows) {
@@ -699,16 +708,21 @@ export function Terminal({ projectPath, onAliveChange, visible = true }: Termina
       fitAddonRef.current = null;
       searchAddonRef.current = null;
       sessionIdRef.current = null;
+      shellNameRef.current = null;
     };
   }, []); // only mount once
 
-  // When project changes, cd into it
+  // When project changes, cd into it (delay to let shell finish initializing)
   useEffect(() => {
     if (projectPath && projectPath !== spawnedForPath.current && sessionIdRef.current) {
-      ipc.terminalCd(sessionIdRef.current, projectPath).catch((err) => {
-        console.warn("terminalCd failed:", err);
-      });
+      const sid = sessionIdRef.current;
+      const timer = setTimeout(() => {
+        ipc.terminalCd(sid, projectPath).catch((err) => {
+          console.warn("terminalCd failed:", err);
+        });
+      }, 1500);
       spawnedForPath.current = projectPath;
+      return () => clearTimeout(timer);
     }
   }, [projectPath]);
 

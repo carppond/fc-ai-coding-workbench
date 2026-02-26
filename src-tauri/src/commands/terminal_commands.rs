@@ -15,7 +15,7 @@ pub fn spawn_terminal(
     initial_dir: Option<String>,
     rows: Option<u16>,
     cols: Option<u16>,
-) -> AppResult<String> {
+) -> AppResult<(String, String)> {
     let r = rows.unwrap_or(24);
     let c = cols.unwrap_or(80);
 
@@ -23,12 +23,13 @@ pub fn spawn_terminal(
         TerminalSession::spawn(app, initial_dir.as_deref(), r, c).map_err(AppError::General)?;
 
     let session_id = session.id.clone();
+    let shell_name = session.shell_name.clone();
     let mut sessions = state
         .sessions
         .lock()
         .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
     sessions.insert(session_id.clone(), session);
-    Ok(session_id)
+    Ok((session_id, shell_name))
 }
 
 #[tauri::command]
@@ -89,8 +90,7 @@ pub fn terminal_cd(
         .lock()
         .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
     if let Some(session) = sessions.get(&session_id) {
-        // Leading space prevents shell history entry; clear wipes the echoed command
-        let cmd = format!(" cd {} && clear\n", shell_escape(&path));
+        let cmd = build_cd_command(&session.shell_name, &path);
         session
             .write(&cmd)
             .map_err(|e| AppError::General(e))?;
@@ -98,6 +98,23 @@ pub fn terminal_cd(
     Ok(())
 }
 
-fn shell_escape(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "'\\''"))
+/// Build a cd + clear command appropriate for the given shell.
+fn build_cd_command(shell_name: &str, path: &str) -> String {
+    match shell_name {
+        "cmd" | "cmd.exe" => {
+            // cmd.exe: cd /d "path" & cls
+            format!("cd /d \"{}\" & cls\n", path.replace('"', ""))
+        }
+        "pwsh" | "pwsh.exe" | "powershell" | "powershell.exe" => {
+            // PowerShell: Set-Location then Clear-Host
+            let escaped = path.replace('\'', "''");
+            format!(" Set-Location '{}'; Clear-Host\n", escaped)
+        }
+        _ => {
+            // Unix shells (zsh, bash, fish, sh)
+            // Leading space prevents shell history entry
+            let escaped = format!("'{}'", path.replace('\'', "'\\''"));
+            format!(" cd {} && clear\n", escaped)
+        }
+    }
 }

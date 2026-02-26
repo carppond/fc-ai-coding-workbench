@@ -297,7 +297,7 @@ export const runInstallCommand = (commandType: string, method: string) =>
 // --- Terminal ---
 
 export const spawnTerminal = (initialDir?: string, rows?: number, cols?: number) =>
-  invoke<string>("spawn_terminal", { initialDir, rows, cols });
+  invoke<[string, string]>("spawn_terminal", { initialDir, rows, cols });
 
 export const writeTerminal = (sessionId: string, data: string) =>
   invoke<void>("write_terminal", { sessionId, data });
