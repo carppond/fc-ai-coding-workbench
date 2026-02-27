@@ -2,7 +2,6 @@ import { useEffect, useRef } from "react";
 import { Loader2, Sparkles } from "lucide-react";
 import { useGitStore } from "../../stores/gitStore";
 import { useProjectStore } from "../../stores/projectStore";
-import { useSettingsStore } from "../../stores/settingsStore";
 import { useI18n } from "../../lib/i18n";
 import { useToast } from "../common/Toast";
 import { useConfirm } from "../common/ConfirmDialog";
@@ -21,7 +20,6 @@ export function GitActions() {
   const clearError = useGitStore((s) => s.clearError);
   const fileStatuses = useGitStore((s) => s.fileStatuses);
   const activeProject = useProjectStore((s) => s.activeProject);
-  const { activeProvider, activeModel, providers } = useSettingsStore();
   const { t } = useI18n();
   const { toast } = useToast();
   const { confirm } = useConfirm();
@@ -71,9 +69,7 @@ export function GitActions() {
 
   const handleGenerate = async () => {
     if (!activeProject || !hasStagedFiles) return;
-    const currentProvider = providers.find((p) => p.id === activeProvider);
-    const baseUrl = currentProvider?.baseUrl;
-    const ok = await genCommitMsg(activeProject.path, activeProvider, activeModel, baseUrl || undefined);
+    const ok = await genCommitMsg(activeProject.path);
     if (!ok) {
       toast(t("git.noStagedForAI"), "error");
     }

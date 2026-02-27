@@ -47,7 +47,7 @@ interface GitState {
   commit: (projectPath: string) => Promise<boolean>;
   pull: (projectPath: string) => Promise<boolean>;
   push: (projectPath: string) => Promise<boolean>;
-  generateCommitMessage: (projectPath: string, provider: string, model: string, baseUrl?: string) => Promise<boolean>;
+  generateCommitMessage: (projectPath: string) => Promise<boolean>;
   setCommitMessage: (msg: string) => void;
   clearError: () => void;
   reset: () => void;
@@ -365,11 +365,11 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
   },
 
-  generateCommitMessage: async (projectPath, provider, model, baseUrl) => {
+  generateCommitMessage: async (projectPath) => {
     if (get().generating) return false;
     set({ generating: true, error: null });
     try {
-      const msg = await ipc.generateCommitMessage(projectPath, provider, model, baseUrl);
+      const msg = await ipc.generateCommitMessage(projectPath);
       set({ commitMessage: msg, generating: false });
       return true;
     } catch (e: unknown) {

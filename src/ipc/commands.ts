@@ -223,8 +223,8 @@ export const gitLog = (projectPath: string) =>
 export const gitInitRepo = (projectPath: string, remoteUrl?: string) =>
   invoke<void>("git_init_repo", { projectPath, remoteUrl });
 
-export const generateCommitMessage = (projectPath: string, provider: string, model: string, baseUrl?: string) =>
-  invoke<string>("generate_commit_message", { projectPath, provider, model, baseUrl });
+export const generateCommitMessage = (projectPath: string) =>
+  invoke<string>("generate_commit_message", { projectPath });
 
 // --- Project filesystem ---
 

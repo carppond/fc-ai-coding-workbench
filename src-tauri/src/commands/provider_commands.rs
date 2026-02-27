@@ -82,18 +82,14 @@ pub async fn test_api_key(
 
 #[tauri::command]
 pub async fn generate_commit_message(
-    state: State<'_, AppState>,
     project_path: String,
-    provider: String,
-    model: String,
-    base_url: Option<String>,
 ) -> AppResult<String> {
     let diff = crate::git::diff_staged(&project_path)?;
     if diff.trim().is_empty() {
         return Err(AppError::Provider("No staged changes".to_string()));
     }
 
-    // Truncate very large diffs to avoid exceeding token limits
+    // 截断过大的 diff，避免超出 token 限制
     let max_len = 15000;
     let truncated_diff = if diff.len() > max_len {
         format!("{}...\n\n(diff truncated)", &diff[..max_len])
@@ -101,8 +97,7 @@ pub async fn generate_commit_message(
         diff
     };
 
-    let system_prompt = "You are a commit message generator. Output ONLY the commit message, nothing else. No quotes, no explanation, no markdown.";
-    let user_message = format!(
+    let prompt = format!(
         "Generate a concise git commit message for the following staged changes.\n\
          Rules:\n\
          - Use Conventional Commits format (feat:, fix:, refactor:, docs:, chore:, test:, style:, perf:, ci:, build:)\n\
@@ -110,29 +105,24 @@ pub async fn generate_commit_message(
          - Write in English\n\
          - Use the most relevant type prefix based on the primary change\n\
          - Add a short body (separated by blank line) only if the changes are complex\n\
-         - Output ONLY the commit message text\n\n\
+         - Output ONLY the commit message text, nothing else. No quotes, no explanation, no markdown.\n\n\
          Staged diff:\n```\n{}\n```",
         truncated_diff
     );
 
-    let api_key = crate::keychain::get_api_key(&provider)?;
-    let client = state.http_client.read().unwrap().clone();
+    // 使用 claude -p 非交互模式，不创建对话历史
+    let output = tokio::process::Command::new("claude")
+        .args(["-p", &prompt])
+        .current_dir(&project_path)
+        .output()
+        .await
+        .map_err(|e| AppError::Provider(format!("Failed to run claude CLI: {}", e)))?;
 
-    let result = match provider.as_str() {
-        "anthropic" => {
-            providers::anthropic::generate_text(
-                &client, &api_key, &model, system_prompt, &user_message,
-            )
-            .await?
-        }
-        _ => {
-            let url = base_url.unwrap_or_else(|| providers::default_base_url(&provider));
-            providers::openai::generate_text(
-                &client, &api_key, &url, &model, system_prompt, &user_message,
-            )
-            .await?
-        }
-    };
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(AppError::Provider(format!("claude CLI error: {}", stderr)));
+    }
 
-    Ok(result.trim().to_string())
+    let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(result)
 }

@@ -150,55 +150,6 @@ pub async fn stream_chat(
     Ok(())
 }
 
-pub async fn generate_text(
-    client: &reqwest::Client,
-    api_key: &str,
-    model: &str,
-    system_prompt: &str,
-    user_message: &str,
-) -> AppResult<String> {
-    let body = serde_json::json!({
-        "model": model,
-        "max_tokens": 1024,
-        "system": system_prompt,
-        "messages": [{"role": "user", "content": user_message}],
-    });
-
-    let response = client
-        .post("https://api.anthropic.com/v1/messages")
-        .header("x-api-key", api_key)
-        .header("anthropic-version", "2023-06-01")
-        .header("content-type", "application/json")
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| AppError::Provider(e.to_string()))?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let text = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unknown error".to_string());
-        return Err(AppError::Provider(format!(
-            "Anthropic API error {}: {}",
-            status, text
-        )));
-    }
-
-    let json: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|e| AppError::Provider(e.to_string()))?;
-
-    let text = json["content"][0]["text"]
-        .as_str()
-        .unwrap_or("")
-        .to_string();
-
-    Ok(text)
-}
-
 pub async fn test_connection(
     client: &reqwest::Client,
     api_key: &str,
