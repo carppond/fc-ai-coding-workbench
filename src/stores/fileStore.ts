@@ -9,16 +9,20 @@ interface FileState {
   loading: boolean;
   currentProjectPath: string | null;
 
-  // File viewer state
+  // File viewer/editor state
   openFilePath: string | null;
   openFileContent: string;
   openFileLine: number | null; // line to scroll to after opening
+  isDirty: boolean;
+  saving: boolean;
 
   loadTree: (projectPath: string) => Promise<void>;
   toggleExpand: (path: string) => void;
   refreshExpanded: (projectPath: string) => Promise<void>;
   openFile: (filePath: string, line?: number) => Promise<void>;
   closeFile: () => void;
+  markDirty: (dirty: boolean) => void;
+  saveFile: (content: string) => Promise<boolean>;
   refreshParent: (parentPath: string) => Promise<void>;
   reset: () => void;
 }
@@ -49,6 +53,8 @@ export const useFileStore = create<FileState>((set, get) => ({
   openFilePath: null,
   openFileContent: "",
   openFileLine: null,
+  isDirty: false,
+  saving: false,
 
   loadTree: async (projectPath: string) => {
     set({ loading: true, currentProjectPath: projectPath });
@@ -135,7 +141,7 @@ export const useFileStore = create<FileState>((set, get) => ({
   },
 
   openFile: async (filePath: string, line?: number) => {
-    set({ openFilePath: filePath, openFileContent: "", openFileLine: line ?? null });
+    set({ openFilePath: filePath, openFileContent: "", openFileLine: line ?? null, isDirty: false });
     try {
       const content = await ipc.readFileContent(filePath);
       if (get().openFilePath === filePath) {
@@ -149,7 +155,25 @@ export const useFileStore = create<FileState>((set, get) => ({
   },
 
   closeFile: () => {
-    set({ openFilePath: null, openFileContent: "", openFileLine: null });
+    set({ openFilePath: null, openFileContent: "", openFileLine: null, isDirty: false });
+  },
+
+  markDirty: (dirty: boolean) => {
+    set({ isDirty: dirty });
+  },
+
+  saveFile: async (content: string) => {
+    const path = get().openFilePath;
+    if (!path) return false;
+    set({ saving: true });
+    try {
+      await ipc.writeFileContent(path, content);
+      set({ openFileContent: content, isDirty: false, saving: false });
+      return true;
+    } catch {
+      set({ saving: false });
+      return false;
+    }
   },
 
   refreshParent: async (parentPath: string) => {
@@ -178,6 +202,8 @@ export const useFileStore = create<FileState>((set, get) => ({
       openFilePath: null,
       openFileContent: "",
       openFileLine: null,
+      isDirty: false,
+      saving: false,
     });
   },
 }));

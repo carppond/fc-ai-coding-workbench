@@ -5,6 +5,7 @@ import { useFileStore } from "../../stores/fileStore";
 import { useI18n } from "../../lib/i18n";
 import { Terminal } from "./Terminal";
 import { FileViewer } from "./FileViewer";
+import { useConfirm } from "../common/ConfirmDialog";
 
 interface TerminalTab {
   id: string;
@@ -22,8 +23,11 @@ function nextTabId(): string {
 
 export function CenterPanel() {
   const { activeProject } = useProjectStore();
-  const { openFilePath, closeFile } = useFileStore();
+  const openFilePath = useFileStore((s) => s.openFilePath);
+  const closeFile = useFileStore((s) => s.closeFile);
+  const isDirty = useFileStore((s) => s.isDirty);
   const { t } = useI18n();
+  const { confirm } = useConfirm();
 
   // Tab management
   const [tabs, setTabs] = useState<TerminalTab[]>(() => {
@@ -152,9 +156,30 @@ export function CenterPanel() {
         {openFilePath && (
           <button
             className="panel-tab panel-tab--active"
-            style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+            style={{ maxWidth: 200, display: "flex", alignItems: "center", gap: 6 }}
           >
-            {openFilePath.split("/").pop()}
+            {isDirty && <span className="panel-tab__dirty-dot" />}
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {openFilePath.split("/").pop()}
+            </span>
+            <span
+              className="panel-tab__close"
+              onClick={async (e) => {
+                e.stopPropagation();
+                if (isDirty) {
+                  const result = await confirm({
+                    message: t("fileViewer.unsavedChanges"),
+                    confirmLabel: t("fileViewer.dontSave"),
+                    cancelLabel: t("confirm.cancel"),
+                  });
+                  if (result) closeFile();
+                } else {
+                  closeFile();
+                }
+              }}
+            >
+              <X size={12} />
+            </span>
           </button>
         )}
       </div>

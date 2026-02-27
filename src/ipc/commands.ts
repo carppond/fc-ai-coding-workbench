@@ -8,6 +8,7 @@ import type {
   GitFileStatus,
   GitLogEntry,
   GitBranchInfo,
+  BranchListItem,
   ChatMessage,
 } from "../lib/types";
 
@@ -223,6 +224,18 @@ export const gitLog = (projectPath: string) =>
 export const gitInitRepo = (projectPath: string, remoteUrl?: string) =>
   invoke<void>("git_init_repo", { projectPath, remoteUrl });
 
+export const gitListBranches = (projectPath: string) =>
+  invoke<BranchListItem[]>("git_list_branches", { projectPath });
+
+export const gitCheckoutBranch = (projectPath: string, branchName: string) =>
+  invoke<void>("git_checkout_branch", { projectPath, branchName });
+
+export const gitCreateBranch = (projectPath: string, branchName: string) =>
+  invoke<void>("git_create_branch", { projectPath, branchName });
+
+export const gitDeleteBranch = (projectPath: string, branchName: string, force: boolean) =>
+  invoke<void>("git_delete_branch", { projectPath, branchName, force });
+
 export const generateCommitMessage = (projectPath: string) =>
   invoke<string>("generate_commit_message", { projectPath });
 
@@ -236,6 +249,9 @@ export const readDirectoryChildren = (path: string) =>
 
 export const readFileContent = (path: string, maxSize?: number) =>
   invoke<string>("read_file_content", { path, maxSize });
+
+export const writeFileContent = (path: string, content: string) =>
+  invoke<void>("write_file_content", { path, content });
 
 export const createFileOrDir = (path: string, isDir: boolean) =>
   invoke<void>("create_file_or_dir", { path, isDir });

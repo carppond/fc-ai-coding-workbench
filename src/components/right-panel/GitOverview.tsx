@@ -1,7 +1,9 @@
-import { GitBranch, RefreshCw } from "lucide-react";
+import { useState } from "react";
+import { GitBranch, RefreshCw, ChevronDown } from "lucide-react";
 import { useGitStore } from "../../stores/gitStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useI18n } from "../../lib/i18n";
+import { BranchSelector } from "./BranchSelector";
 
 export function GitOverview() {
   const branchInfo = useGitStore((s) => s.branchInfo);
@@ -10,6 +12,8 @@ export function GitOverview() {
   const isGitRepo = useGitStore((s) => s.isGitRepo);
   const activeProject = useProjectStore((s) => s.activeProject);
   const { t } = useI18n();
+
+  const [showBranches, setShowBranches] = useState(false);
 
   const handleRefresh = () => {
     if (activeProject) refresh(activeProject.path);
@@ -34,10 +38,17 @@ export function GitOverview() {
   }
 
   return (
-    <div className="git-overview">
+    <div className="git-overview" style={{ position: "relative" }}>
       <div className="git-overview__branch">
         <GitBranch size={14} />
-        <span>{branchInfo.name}</span>
+        <button
+          className="git-overview__branch-name"
+          onClick={() => setShowBranches(!showBranches)}
+          title={t("git.switchBranch")}
+        >
+          <span>{branchInfo.name}</span>
+          <ChevronDown size={12} />
+        </button>
         <button
           className="btn btn--ghost btn--icon"
           onClick={handleRefresh}
@@ -60,6 +71,10 @@ export function GitOverview() {
           </span>
         )}
       </div>
+
+      {showBranches && (
+        <BranchSelector onClose={() => setShowBranches(false)} />
+      )}
     </div>
   );
 }

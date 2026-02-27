@@ -8,6 +8,7 @@ pub async fn stream_chat(
     app: tauri::AppHandle,
     client: reqwest::Client,
     api_key: &str,
+    base_url: &str,
     model: &str,
     mode: &str,
     messages: &[ChatMessage],
@@ -40,7 +41,7 @@ pub async fn stream_chat(
     });
 
     let response = client
-        .post("https://api.anthropic.com/v1/messages")
+        .post(&format!("{}/messages", base_url))
         .header("x-api-key", api_key)
         .header("anthropic-version", "2023-06-01")
         .header("content-type", "application/json")
@@ -153,6 +154,7 @@ pub async fn stream_chat(
 pub async fn test_connection(
     client: &reqwest::Client,
     api_key: &str,
+    base_url: &str,
 ) -> AppResult<bool> {
     let body = serde_json::json!({
         "model": "claude-haiku-3.5",
@@ -161,7 +163,7 @@ pub async fn test_connection(
     });
 
     let response = client
-        .post("https://api.anthropic.com/v1/messages")
+        .post(&format!("{}/messages", base_url))
         .header("x-api-key", api_key)
         .header("anthropic-version", "2023-06-01")
         .header("content-type", "application/json")

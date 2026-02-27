@@ -1,149 +1,159 @@
-import { useMemo, useEffect, useRef } from "react";
-import { X, Copy, Check } from "lucide-react";
+import { useEffect, useRef, useState, useCallback } from "react";
+import { X, Copy, Check, Save } from "lucide-react";
 import { useFileStore } from "../../stores/fileStore";
 import { useI18n } from "../../lib/i18n";
-import { useState } from "react";
 
-const MAX_LINES = 5000;
+import { EditorState, type Extension } from "@codemirror/state";
+import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, dropCursor, rectangularSelection, crosshairCursor } from "@codemirror/view";
+import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
+import { syntaxHighlighting as cmSyntaxHighlighting, indentOnInput, bracketMatching, foldGutter, foldKeymap } from "@codemirror/language";
+import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
+import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 
-// Language detection by file extension
-type LangType = "js" | "rust" | "python" | "css" | "html" | "json" | "markdown" | "plain";
-
-const EXT_MAP: Record<string, LangType> = {
-  js: "js", jsx: "js", ts: "js", tsx: "js", mjs: "js", cjs: "js",
-  rs: "rust", toml: "rust",
-  py: "python", pyw: "python",
-  css: "css", scss: "css", less: "css",
-  html: "html", htm: "html", xml: "html", svg: "html",
-  json: "json",
-  md: "markdown", mdx: "markdown",
-};
-
-function detectLang(filePath: string): LangType {
-  const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
-  return EXT_MAP[ext] ?? "plain";
-}
-
-// Lightweight keyword-based syntax coloring
-const KEYWORD_PATTERNS: Record<LangType, { pattern: RegExp; className: string }[]> = {
-  js: [
-    { pattern: /(\/\/.*$)/gm, className: "syn-comment" },
-    { pattern: /("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)/g, className: "syn-string" },
-    { pattern: /\b(import|export|from|const|let|var|function|return|if|else|for|while|class|extends|new|this|async|await|try|catch|throw|typeof|instanceof|interface|type|enum|default|switch|case|break|continue|null|undefined|true|false|void)\b/g, className: "syn-keyword" },
-    { pattern: /\b(\d+\.?\d*)\b/g, className: "syn-number" },
-  ],
-  rust: [
-    { pattern: /(\/\/.*$)/gm, className: "syn-comment" },
-    { pattern: /("(?:[^"\\]|\\.)*")/g, className: "syn-string" },
-    { pattern: /\b(fn|let|mut|pub|use|mod|struct|enum|impl|trait|where|for|while|loop|if|else|match|return|self|Self|super|crate|async|await|move|ref|true|false|type|const|static|unsafe|extern)\b/g, className: "syn-keyword" },
-    { pattern: /\b(\d+\.?\d*)\b/g, className: "syn-number" },
-  ],
-  python: [
-    { pattern: /(#.*$)/gm, className: "syn-comment" },
-    { pattern: /("""[\s\S]*?"""|'''[\s\S]*?'''|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/g, className: "syn-string" },
-    { pattern: /\b(def|class|import|from|return|if|elif|else|for|while|with|as|try|except|finally|raise|pass|break|continue|and|or|not|is|in|None|True|False|lambda|yield|global|nonlocal|async|await)\b/g, className: "syn-keyword" },
-    { pattern: /\b(\d+\.?\d*)\b/g, className: "syn-number" },
-  ],
-  css: [
-    { pattern: /(\/\*[\s\S]*?\*\/)/g, className: "syn-comment" },
-    { pattern: /("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/g, className: "syn-string" },
-    { pattern: /(#[0-9a-fA-F]{3,8})\b/g, className: "syn-number" },
-    { pattern: /\b(\d+\.?\d*(px|em|rem|%|vh|vw|s|ms)?)\b/g, className: "syn-number" },
-  ],
-  html: [
-    { pattern: /(<!--[\s\S]*?-->)/g, className: "syn-comment" },
-    { pattern: /("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/g, className: "syn-string" },
-    { pattern: /(<\/?[a-zA-Z][a-zA-Z0-9-]*)/g, className: "syn-keyword" },
-  ],
-  json: [
-    { pattern: /("(?:[^"\\]|\\.)*")\s*:/g, className: "syn-keyword" },
-    { pattern: /:\s*("(?:[^"\\]|\\.)*")/g, className: "syn-string" },
-    { pattern: /\b(true|false|null)\b/g, className: "syn-keyword" },
-    { pattern: /\b(\d+\.?\d*)\b/g, className: "syn-number" },
-  ],
-  markdown: [
-    { pattern: /^(#{1,6}\s.*)$/gm, className: "syn-keyword" },
-    { pattern: /(`[^`]+`)/g, className: "syn-string" },
-    { pattern: /(\*\*[^*]+\*\*|__[^_]+__)/g, className: "syn-keyword" },
-  ],
-  plain: [],
-};
-
-function highlightLine(line: string, lang: LangType): (string | { text: string; cls: string })[] {
-  const patterns = KEYWORD_PATTERNS[lang];
-  if (!patterns.length) return [line];
-
-  // Build an array of segments with their positions
-  const segments: { start: number; end: number; cls: string }[] = [];
-
-  for (const { pattern, className } of patterns) {
-    const re = new RegExp(pattern.source, pattern.flags);
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(line)) !== null) {
-      // Use the first capture group if available, otherwise the full match
-      const matchText = m[1] ?? m[0];
-      const start = m.index + (m[1] ? m[0].indexOf(m[1]) : 0);
-      const end = start + matchText.length;
-      // Only add if no overlap with existing
-      const overlaps = segments.some(
-        (s) => (start >= s.start && start < s.end) || (end > s.start && end <= s.end)
-      );
-      if (!overlaps) {
-        segments.push({ start, end, cls: className });
-      }
-    }
-  }
-
-  if (!segments.length) return [line];
-
-  // Sort by position
-  segments.sort((a, b) => a.start - b.start);
-
-  const result: (string | { text: string; cls: string })[] = [];
-  let pos = 0;
-  for (const seg of segments) {
-    if (seg.start > pos) {
-      result.push(line.slice(pos, seg.start));
-    }
-    result.push({ text: line.slice(seg.start, seg.end), cls: seg.cls });
-    pos = seg.end;
-  }
-  if (pos < line.length) {
-    result.push(line.slice(pos));
-  }
-  return result;
-}
+import { appEditorTheme, appHighlightStyle } from "./editorTheme";
+import { getLanguageExtension } from "./editorLanguages";
 
 export function FileViewer() {
-  const { openFilePath, openFileContent, openFileLine, closeFile } = useFileStore();
+  const openFilePath = useFileStore((s) => s.openFilePath);
+  const openFileContent = useFileStore((s) => s.openFileContent);
+  const openFileLine = useFileStore((s) => s.openFileLine);
+  const isDirty = useFileStore((s) => s.isDirty);
+  const saving = useFileStore((s) => s.saving);
+  const closeFile = useFileStore((s) => s.closeFile);
+  const markDirty = useFileStore((s) => s.markDirty);
+  const saveFile = useFileStore((s) => s.saveFile);
   const { t } = useI18n();
-  const contentRef = useRef<HTMLDivElement>(null);
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  const viewRef = useRef<EditorView | null>(null);
   const [copied, setCopied] = useState(false);
+  const [saved, setSaved] = useState(false);
+  // 跟踪编辑器创建时的文件路径，用于识别文件切换
+  const editorFileRef = useRef<string | null>(null);
+  // 原始内容引用，用于脏状态判断
+  const originalContentRef = useRef("");
 
-  const { lines, truncated } = useMemo(() => {
-    if (!openFileContent) return { lines: [] as string[], truncated: false };
-    const all = openFileContent.split("\n");
-    if (all.length <= MAX_LINES) {
-      return { lines: all, truncated: false };
-    }
-    return { lines: all.slice(0, MAX_LINES), truncated: true };
-  }, [openFileContent]);
+  // 保存回调（保持最新引用，供 keymap 使用）
+  const saveCallbackRef = useRef<() => void>(() => {});
+  saveCallbackRef.current = useCallback(() => {
+    if (!viewRef.current) return;
+    const content = viewRef.current.state.doc.toString();
+    saveFile(content).then((ok) => {
+      if (ok) {
+        originalContentRef.current = content;
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+      }
+    });
+  }, [saveFile]);
 
-  const lang = useMemo(() => {
-    return openFilePath ? detectLang(openFilePath) : "plain" as LangType;
-  }, [openFilePath]);
-
-  // Scroll to target line when content loads
+  // 创建/更新编辑器
   useEffect(() => {
-    if (!openFileLine || !openFileContent || !contentRef.current) return;
-    const row = contentRef.current.querySelector(`#line-${openFileLine}`);
-    if (row) {
-      row.scrollIntoView({ block: "center", behavior: "smooth" });
-      row.classList.add("file-viewer__line--highlight");
-      const timer = setTimeout(() => row.classList.remove("file-viewer__line--highlight"), 3000);
-      return () => clearTimeout(timer);
+    if (!containerRef.current || !openFilePath || openFileContent === "") return;
+
+    // 如果编辑器已存在且是同一个文件，跳过重建
+    if (viewRef.current && editorFileRef.current === openFilePath) return;
+
+    // 销毁旧编辑器
+    if (viewRef.current) {
+      viewRef.current.destroy();
+      viewRef.current = null;
     }
-  }, [openFileLine, openFileContent]);
+    editorFileRef.current = openFilePath;
+    originalContentRef.current = openFileContent;
+
+    // 异步加载语言扩展
+    const setup = async () => {
+      const langExt = await getLanguageExtension(openFilePath);
+
+      const extensions: Extension[] = [];
+
+      // 语言扩展放在最前面，确保语法树先于括号匹配可用
+      if (langExt) {
+        extensions.push(langExt);
+      }
+
+      extensions.push(
+        lineNumbers(),
+        highlightActiveLineGutter(),
+        history(),
+        foldGutter(),
+        drawSelection(),
+        dropCursor(),
+        EditorState.allowMultipleSelections.of(true),
+        indentOnInput(),
+        cmSyntaxHighlighting(appHighlightStyle),
+        bracketMatching({ brackets: "()[]{}",  afterCursor: true }),
+        closeBrackets(),
+        autocompletion(),
+        rectangularSelection(),
+        crosshairCursor(),
+        highlightActiveLine(),
+        highlightSelectionMatches(),
+        keymap.of([
+          ...closeBracketsKeymap,
+          ...defaultKeymap,
+          ...searchKeymap,
+          ...historyKeymap,
+          ...foldKeymap,
+          ...completionKeymap,
+          indentWithTab,
+          // Cmd+S / Ctrl+S 保存
+          {
+            key: "Mod-s",
+            run: () => {
+              saveCallbackRef.current();
+              return true;
+            },
+          },
+        ]),
+        // 监听内容变化，更新脏状态
+        EditorView.updateListener.of((update) => {
+          if (update.docChanged) {
+            const newContent = update.state.doc.toString();
+            const dirty = newContent !== originalContentRef.current;
+            markDirty(dirty);
+          }
+        }),
+        appEditorTheme,
+      );
+
+      const state = EditorState.create({
+        doc: openFileContent,
+        extensions,
+      });
+
+      if (!containerRef.current) return;
+
+      const view = new EditorView({
+        state,
+        parent: containerRef.current,
+      });
+
+      viewRef.current = view;
+
+      // 滚动到指定行
+      if (openFileLine && openFileLine > 0) {
+        const line = Math.min(openFileLine, view.state.doc.lines);
+        const lineInfo = view.state.doc.line(line);
+        view.dispatch({
+          effects: EditorView.scrollIntoView(lineInfo.from, { y: "center" }),
+          selection: { anchor: lineInfo.from },
+        });
+      }
+    };
+
+    setup();
+
+    return () => {
+      // 组件卸载时清理
+      if (viewRef.current) {
+        viewRef.current.destroy();
+        viewRef.current = null;
+        editorFileRef.current = null;
+      }
+    };
+  }, [openFilePath, openFileContent, openFileLine, markDirty]);
 
   const handleCopyPath = async () => {
     if (!openFilePath) return;
@@ -154,6 +164,10 @@ export function FileViewer() {
     } catch { /* ignore */ }
   };
 
+  const handleSave = () => {
+    saveCallbackRef.current();
+  };
+
   if (!openFilePath) return null;
 
   return (
@@ -162,7 +176,22 @@ export function FileViewer() {
         <span className="file-viewer__path" title={openFilePath}>
           {openFilePath}
         </span>
-        <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+        <div style={{ display: "flex", gap: 4, flexShrink: 0, alignItems: "center" }}>
+          {saved && (
+            <span style={{ fontSize: 11, color: "var(--success)" }}>
+              {t("fileViewer.saved")}
+            </span>
+          )}
+          {isDirty && (
+            <button
+              className="btn btn--ghost btn--sm"
+              onClick={handleSave}
+              disabled={saving}
+              title={t("fileViewer.save")}
+            >
+              <Save size={13} />
+            </button>
+          )}
           <button
             className="btn btn--ghost btn--sm"
             onClick={handleCopyPath}
@@ -179,43 +208,8 @@ export function FileViewer() {
           </button>
         </div>
       </div>
-      {truncated && (
-        <div className="file-viewer__warning">
-          {t("fileViewer.tooLarge").replace("{lines}", String(MAX_LINES))}
-        </div>
-      )}
-      <div className="file-viewer__content" ref={contentRef}>
-        <pre className="file-viewer__pre">
-          <table className="file-viewer__table">
-            <tbody>
-              {lines.map((line, i) => (
-                <tr key={i} id={`line-${i + 1}`}>
-                  <td className="file-viewer__line-number">{i + 1}</td>
-                  <td className="file-viewer__line-content">
-                    <SyntaxLine line={line || " "} lang={lang} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </pre>
-      </div>
+      <div className="file-viewer__editor" ref={containerRef} />
     </div>
   );
 }
 
-function SyntaxLine({ line, lang }: { line: string; lang: LangType }) {
-  const parts = useMemo(() => highlightLine(line, lang), [line, lang]);
-
-  return (
-    <>
-      {parts.map((p, i) =>
-        typeof p === "string" ? (
-          <span key={i}>{p}</span>
-        ) : (
-          <span key={i} className={p.cls}>{p.text}</span>
-        )
-      )}
-    </>
-  );
-}

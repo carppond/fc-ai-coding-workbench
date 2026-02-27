@@ -111,6 +111,21 @@ const translations: Record<Locale, Record<string, string>> = {
     "git.generateCommit": "AI 生成",
     "git.noStagedForAI": "没有暂存的更改",
     "git.generating": "正在生成...",
+    "git.branches": "分支",
+    "git.localBranches": "本地分支",
+    "git.remoteBranches": "远程分支",
+    "git.newBranchPlaceholder": "新建分支名称...",
+    "git.createBranch": "创建",
+    "git.deleteBranch": "删除分支",
+    "git.deleteBranchConfirm": "确定删除分支 \"{name}\"？",
+    "git.forceDelete": "强制删除",
+    "git.branchNotMerged": "分支未合并，需要强制删除",
+    "git.switchBranch": "切换分支",
+    "git.currentBranch": "当前分支",
+    "git.branchCreated": "分支已创建",
+    "git.branchDeleted": "分支已删除",
+    "git.branchSwitched": "已切换到分支",
+    "git.searchBranches": "搜索分支...",
 
     // TopBar - Theme
     "topbar.switchTheme": "切换主题",
@@ -218,10 +233,14 @@ const translations: Record<Locale, Record<string, string>> = {
     "fileSearch.noResults": "未找到匹配",
     "fileSearch.results": "个匹配",
 
-    // File Viewer
+    // File Viewer / Editor
     "fileViewer.close": "关闭文件",
     "fileViewer.tooLarge": "文件过大，仅显示前 {lines} 行",
     "fileViewer.line": "行",
+    "fileViewer.save": "保存 (Cmd+S)",
+    "fileViewer.saved": "已保存",
+    "fileViewer.unsavedChanges": "文件有未保存的更改，确定关闭？",
+    "fileViewer.dontSave": "不保存",
 
     // Guide
     "guide.title": "记忆指南",
@@ -332,6 +351,21 @@ const translations: Record<Locale, Record<string, string>> = {
     "git.generateCommit": "AI Generate",
     "git.noStagedForAI": "No staged changes",
     "git.generating": "Generating...",
+    "git.branches": "Branches",
+    "git.localBranches": "Local Branches",
+    "git.remoteBranches": "Remote Branches",
+    "git.newBranchPlaceholder": "New branch name...",
+    "git.createBranch": "Create",
+    "git.deleteBranch": "Delete Branch",
+    "git.deleteBranchConfirm": "Delete branch \"{name}\"?",
+    "git.forceDelete": "Force Delete",
+    "git.branchNotMerged": "Branch is not merged, force delete required",
+    "git.switchBranch": "Switch Branch",
+    "git.currentBranch": "Current Branch",
+    "git.branchCreated": "Branch created",
+    "git.branchDeleted": "Branch deleted",
+    "git.branchSwitched": "Switched to branch",
+    "git.searchBranches": "Search branches...",
 
     // TopBar - Theme
     "topbar.switchTheme": "Switch Theme",
@@ -439,10 +473,14 @@ const translations: Record<Locale, Record<string, string>> = {
     "fileSearch.noResults": "No matches found",
     "fileSearch.results": "matches",
 
-    // File Viewer
+    // File Viewer / Editor
     "fileViewer.close": "Close File",
     "fileViewer.tooLarge": "File too large, showing first {lines} lines",
     "fileViewer.line": "Line",
+    "fileViewer.save": "Save (Cmd+S)",
+    "fileViewer.saved": "Saved",
+    "fileViewer.unsavedChanges": "File has unsaved changes. Close anyway?",
+    "fileViewer.dontSave": "Don't Save",
 
     // Guide
     "guide.title": "Memory Guide",

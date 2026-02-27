@@ -880,6 +880,176 @@
   font-weight: 500;
 }
 
+.git-overview__branch-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast);
+}
+
+.git-overview__branch-name:hover {
+  background: var(--bg-hover);
+}
+
+/* ---- BranchSelector ---- */
+.branch-selector {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  max-height: 400px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.branch-selector__search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.branch-selector__search-input {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+}
+
+.branch-selector__section {
+  padding: 4px 0;
+}
+
+.branch-selector__section-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 6px 12px 2px;
+  letter-spacing: 0.5px;
+}
+
+.branch-selector__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-primary);
+  transition: background var(--transition-fast);
+}
+
+.branch-selector__item:hover {
+  background: var(--bg-hover);
+}
+
+.branch-selector__item--current {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.branch-selector__item--remote {
+  color: var(--text-muted);
+}
+
+.branch-selector__item-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branch-selector__check {
+  color: var(--success);
+  flex-shrink: 0;
+}
+
+.branch-selector__upstream {
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.branch-selector__delete-btn {
+  display: none;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  transition: color var(--transition-fast);
+}
+
+.branch-selector__item:hover .branch-selector__delete-btn {
+  display: flex;
+}
+
+.branch-selector__delete-btn:hover {
+  color: var(--danger);
+}
+
+.branch-selector__create {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.branch-selector__create-input {
+  flex: 1;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-size: 13px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  outline: none;
+}
+
+.branch-selector__create-input:focus {
+  border-color: var(--accent);
+}
+
+.branch-selector__confirm {
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+
+.branch-selector__confirm p {
+  font-size: 13px;
+  margin: 0 0 8px;
+  color: var(--text-primary);
+}
+
+.branch-selector__confirm-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
 /* 拖拽分割手柄 */
 .git-resize-handle {
   flex-shrink: 0;
@@ -2087,6 +2257,15 @@
   opacity: 1;
 }
 
+.panel-tab__dirty-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warning);
+  flex-shrink: 0;
+  margin-right: 4px;
+}
+
 /* ========================================
    Terminal Exited Overlay
    ======================================== */
@@ -2183,42 +2362,106 @@
   border-bottom: 1px solid var(--border);
 }
 
-.file-viewer__content {
+.file-viewer__editor {
   flex: 1;
-  overflow: auto;
   min-height: 0;
+  overflow: hidden;
 }
 
-.file-viewer__pre {
-  margin: 0;
-  padding: 0;
-  font-family: "SF Mono", "JetBrains Mono", "Fira Code", monospace;
+.file-viewer__editor .cm-editor {
+  height: 100%;
+}
+
+.file-viewer__editor .cm-scroller {
+  overflow: auto;
+}
+
+/* CodeMirror 搜索面板样式 */
+.file-viewer__editor .cm-panels {
+  font-family: inherit;
+}
+
+.file-viewer__editor .cm-panel.cm-search {
+  padding: 8px 12px;
+  gap: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.file-viewer__editor .cm-panel.cm-search input[type="text"],
+.file-viewer__editor .cm-panel.cm-search .cm-textfield {
+  font-size: 13px;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.file-viewer__editor .cm-panel.cm-search input[type="text"]:focus,
+.file-viewer__editor .cm-panel.cm-search .cm-textfield:focus {
+  border-color: var(--accent);
+}
+
+.file-viewer__editor .cm-panel.cm-search button {
   font-size: 12px;
-  line-height: 1.6;
-  background: none;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.file-viewer__editor .cm-panel.cm-search button:hover {
+  background: var(--bg-hover);
+  border-color: var(--text-muted);
+}
+
+.file-viewer__editor .cm-panel.cm-search button[name="close"] {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  width: 28px;
+  height: 28px;
+  font-size: 18px;
+  font-weight: 400;
+  line-height: 1;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: none;
-}
-
-.file-viewer__table {
-  border-collapse: collapse;
-  width: 100%;
-}
-
-.file-viewer__line-number {
-  width: 50px;
-  min-width: 50px;
-  text-align: right;
-  padding: 0 12px 0 8px;
+  background: transparent;
   color: var(--text-muted);
-  user-select: none;
-  font-size: 11px;
-  vertical-align: top;
-  border-right: 1px solid var(--border);
+  border-radius: var(--radius-sm);
 }
 
-.file-viewer__line-content {
-  padding: 0 12px;
-  white-space: pre;
+.file-viewer__editor .cm-panel.cm-search button[name="close"]:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.file-viewer__editor .cm-panel.cm-search label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.file-viewer__editor .cm-panel.cm-search input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
+.file-viewer__editor .cm-panel.cm-search br {
+  display: none;
 }
 
 /* ========================================

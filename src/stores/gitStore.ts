@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { GitFileStatus, GitBranchInfo, GitLogEntry } from "../lib/types";
+import type { GitFileStatus, GitBranchInfo, GitLogEntry, BranchListItem } from "../lib/types";
 import * as ipc from "../ipc/commands";
 
 function extractErrorMessage(e: unknown): string {
@@ -18,6 +18,7 @@ interface GitState {
   fileStatuses: GitFileStatus[];
   branchInfo: GitBranchInfo | null;
   logEntries: GitLogEntry[];
+  branches: BranchListItem[];
   diffText: string;
   diffStagedText: string;
   selectedFile: SelectedFile | null;
@@ -35,6 +36,10 @@ interface GitState {
   loadLog: (projectPath: string) => Promise<void>;
   loadDiff: (projectPath: string) => Promise<void>;
   loadDiffStaged: (projectPath: string) => Promise<void>;
+  loadBranches: (projectPath: string) => Promise<void>;
+  checkoutBranch: (projectPath: string, branchName: string) => Promise<boolean>;
+  createBranch: (projectPath: string, branchName: string) => Promise<boolean>;
+  deleteBranch: (projectPath: string, branchName: string, force: boolean) => Promise<boolean>;
   selectFile: (projectPath: string, filePath: string, staged: boolean) => Promise<void>;
   reloadSelectedFileDiff: (projectPath: string) => Promise<void>;
   clearSelectedFile: () => void;
@@ -60,6 +65,7 @@ export const useGitStore = create<GitState>((set, get) => ({
   fileStatuses: [],
   branchInfo: null,
   logEntries: [],
+  branches: [],
   diffText: "",
   diffStagedText: "",
   selectedFile: null,
@@ -198,6 +204,57 @@ export const useGitStore = create<GitState>((set, get) => ({
       set({ diffStagedText: diff });
     } catch {
       set({ diffStagedText: "" });
+    }
+  },
+
+  loadBranches: async (projectPath) => {
+    try {
+      const branches = await ipc.gitListBranches(projectPath);
+      set({ branches });
+    } catch {
+      set({ branches: [] });
+    }
+  },
+
+  checkoutBranch: async (projectPath, branchName) => {
+    if (get().operating) return false;
+    set({ operating: true, error: null });
+    try {
+      await ipc.gitCheckoutBranch(projectPath, branchName);
+      set({ operating: false });
+      get().refresh(projectPath);
+      return true;
+    } catch (e: unknown) {
+      set({ error: extractErrorMessage(e), operating: false });
+      return false;
+    }
+  },
+
+  createBranch: async (projectPath, branchName) => {
+    if (get().operating) return false;
+    set({ operating: true, error: null });
+    try {
+      await ipc.gitCreateBranch(projectPath, branchName);
+      set({ operating: false });
+      get().loadBranches(projectPath);
+      return true;
+    } catch (e: unknown) {
+      set({ error: extractErrorMessage(e), operating: false });
+      return false;
+    }
+  },
+
+  deleteBranch: async (projectPath, branchName, force) => {
+    if (get().operating) return false;
+    set({ operating: true, error: null });
+    try {
+      await ipc.gitDeleteBranch(projectPath, branchName, force);
+      set({ operating: false });
+      get().loadBranches(projectPath);
+      return true;
+    } catch (e: unknown) {
+      set({ error: extractErrorMessage(e), operating: false });
+      return false;
     }
   },
 
@@ -386,6 +443,7 @@ export const useGitStore = create<GitState>((set, get) => ({
       fileStatuses: [],
       branchInfo: null,
       logEntries: [],
+      branches: [],
       diffText: "",
       diffStagedText: "",
       selectedFile: null,

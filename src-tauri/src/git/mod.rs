@@ -26,6 +26,14 @@ pub struct GitBranchInfo {
     pub is_detached: bool,
 }
 
+#[derive(Debug, Serialize, Clone)]
+pub struct BranchListItem {
+    pub name: String,
+    pub is_current: bool,
+    pub is_remote: bool,
+    pub upstream: Option<String>,
+}
+
 const MAX_STATUS_ENTRIES: usize = 500;
 const MAX_DIFF_BYTES: usize = 512 * 1024; // 512 KB
 
@@ -639,4 +647,157 @@ pub async fn push(project_path: &str) -> AppResult<String> {
         return Ok(stdout);
     }
     Err(AppError::General(stderr))
+}
+
+// ========== 分支管理 ==========
+
+/// 列出本地和远程分支
+pub fn list_branches(project_path: &str) -> AppResult<Vec<BranchListItem>> {
+    let repo = Repository::open(project_path)?;
+    let mut result = Vec::new();
+
+    // 获取当前分支名
+    let current_name = repo
+        .head()
+        .ok()
+        .and_then(|h| h.shorthand().map(|s| s.to_string()));
+
+    // 本地分支
+    let branches = repo.branches(Some(git2::BranchType::Local))?;
+    for branch_result in branches {
+        let (branch, _) = branch_result?;
+        let name = branch.name()?.unwrap_or("").to_string();
+        let upstream = branch
+            .upstream()
+            .ok()
+            .and_then(|u| u.name().ok().flatten().map(|s| s.to_string()));
+        result.push(BranchListItem {
+            is_current: current_name.as_deref() == Some(&name),
+            name,
+            is_remote: false,
+            upstream,
+        });
+    }
+
+    // 远程分支
+    let remote_branches = repo.branches(Some(git2::BranchType::Remote))?;
+    for branch_result in remote_branches {
+        let (branch, _) = branch_result?;
+        let name = branch.name()?.unwrap_or("").to_string();
+        if name.ends_with("/HEAD") {
+            continue;
+        }
+        result.push(BranchListItem {
+            name,
+            is_current: false,
+            is_remote: true,
+            upstream: None,
+        });
+    }
+
+    Ok(result)
+}
+
+/// 切换分支
+pub fn checkout_branch(project_path: &str, branch_name: &str) -> AppResult<()> {
+    let repo = Repository::open(project_path)?;
+
+    // 检查工作树是否有未提交的修改
+    let statuses = repo.statuses(Some(
+        StatusOptions::new()
+            .include_untracked(false)
+            .include_ignored(false),
+    ))?;
+    let dirty = statuses.iter().any(|e| {
+        let s = e.status();
+        s.intersects(
+            git2::Status::WT_MODIFIED
+                | git2::Status::WT_DELETED
+                | git2::Status::INDEX_NEW
+                | git2::Status::INDEX_MODIFIED
+                | git2::Status::INDEX_DELETED,
+        )
+    });
+    if dirty {
+        return Err(AppError::General(
+            "Cannot switch branch: uncommitted changes exist. Commit or stash first.".into(),
+        ));
+    }
+
+    // 尝试找本地分支
+    match repo.find_branch(branch_name, git2::BranchType::Local) {
+        Ok(branch) => {
+            let refname = branch
+                .get()
+                .name()
+                .ok_or_else(|| AppError::General("Invalid branch ref".into()))?
+                .to_string();
+            repo.set_head(&refname)?;
+        }
+        Err(_) => {
+            // 尝试从远程分支创建本地分支
+            let remote_ref = format!("origin/{}", branch_name);
+            let remote_branch = repo
+                .find_branch(&remote_ref, git2::BranchType::Remote)
+                .map_err(|_| {
+                    AppError::General(format!("Branch '{}' not found", branch_name))
+                })?;
+            let commit = remote_branch.get().peel_to_commit()?;
+            let mut local = repo.branch(branch_name, &commit, false)?;
+            local.set_upstream(Some(&remote_ref))?;
+            let refname = local
+                .get()
+                .name()
+                .ok_or_else(|| AppError::General("Invalid branch ref".into()))?
+                .to_string();
+            repo.set_head(&refname)?;
+        }
+    }
+
+    // 更新工作树
+    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))?;
+
+    Ok(())
+}
+
+/// 从 HEAD 创建新分支
+pub fn create_branch(project_path: &str, branch_name: &str) -> AppResult<()> {
+    let repo = Repository::open(project_path)?;
+    let head = repo.head()?;
+    let commit = head.peel_to_commit()?;
+    repo.branch(branch_name, &commit, false)?;
+    Ok(())
+}
+
+/// 删除本地分支
+pub fn delete_branch(project_path: &str, branch_name: &str, force: bool) -> AppResult<()> {
+    let repo = Repository::open(project_path)?;
+
+    // 不允许删除当前分支
+    let current = repo
+        .head()
+        .ok()
+        .and_then(|h| h.shorthand().map(|s| s.to_string()));
+    if current.as_deref() == Some(branch_name) {
+        return Err(AppError::General(
+            "Cannot delete the currently checked-out branch".into(),
+        ));
+    }
+
+    let mut branch = repo.find_branch(branch_name, git2::BranchType::Local)?;
+
+    if !force {
+        // 检查分支是否已合并到当前 HEAD
+        let head_oid = repo.head()?.peel_to_commit()?.id();
+        let branch_oid = branch.get().peel_to_commit()?.id();
+        let merge_base = repo.merge_base(head_oid, branch_oid).ok();
+        if merge_base != Some(branch_oid) {
+            return Err(AppError::General(
+                "Branch is not fully merged. Use force delete to remove it.".into(),
+            ));
+        }
+    }
+
+    branch.delete()?;
+    Ok(())
 }

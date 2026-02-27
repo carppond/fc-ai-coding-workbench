@@ -80,3 +80,27 @@ pub async fn git_branch_info(project_path: String) -> AppResult<git::GitBranchIn
 pub async fn git_log(project_path: String) -> AppResult<Vec<git::GitLogEntry>> {
     git::log(&project_path)
 }
+
+#[tauri::command]
+pub async fn git_list_branches(project_path: String) -> AppResult<Vec<git::BranchListItem>> {
+    git::list_branches(&project_path)
+}
+
+#[tauri::command]
+pub async fn git_checkout_branch(project_path: String, branch_name: String) -> AppResult<()> {
+    git::checkout_branch(&project_path, &branch_name)
+}
+
+#[tauri::command]
+pub async fn git_create_branch(project_path: String, branch_name: String) -> AppResult<()> {
+    git::create_branch(&project_path, &branch_name)
+}
+
+#[tauri::command]
+pub async fn git_delete_branch(
+    project_path: String,
+    branch_name: String,
+    force: bool,
+) -> AppResult<()> {
+    git::delete_branch(&project_path, &branch_name, force)
+}

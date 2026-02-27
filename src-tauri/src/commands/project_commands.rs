@@ -2,6 +2,15 @@ use crate::errors::AppResult;
 use serde::Serialize;
 use std::path::Path;
 
+/// 排序：目录在前，文件在后，各自按字母序
+fn sort_entries_dirs_first(entries: &mut Vec<std::fs::DirEntry>) {
+    entries.sort_by(|a, b| {
+        let a_dir = a.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        let b_dir = b.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        b_dir.cmp(&a_dir).then_with(|| a.file_name().cmp(&b.file_name()))
+    });
+}
+
 const SKIP_DIRS: &[&str] = &[
     "node_modules",
     ".git",
@@ -30,7 +39,7 @@ pub async fn read_directory_children(path: String) -> AppResult<Vec<DirEntry>> {
 
     let read_dir = std::fs::read_dir(dir)?;
     let mut sorted: Vec<_> = read_dir.filter_map(|e| e.ok()).collect();
-    sorted.sort_by_key(|e| e.file_name());
+    sort_entries_dirs_first(&mut sorted);
 
     for child in sorted {
         let name = child.file_name().to_string_lossy().to_string();
@@ -61,7 +70,7 @@ pub fn read_directory_tree(path: String, max_depth: Option<usize>) -> AppResult<
 
     let read_dir = std::fs::read_dir(dir)?;
     let mut sorted: Vec<_> = read_dir.filter_map(|e| e.ok()).collect();
-    sorted.sort_by_key(|e| e.file_name());
+    sort_entries_dirs_first(&mut sorted);
 
     for child in sorted {
         let name = child.file_name().to_string_lossy().to_string();
@@ -97,7 +106,7 @@ fn read_children_recursive(dir: &Path, remaining_depth: usize) -> AppResult<Vec<
     let mut entries = Vec::new();
     let read_dir = std::fs::read_dir(dir)?;
     let mut sorted: Vec<_> = read_dir.filter_map(|e| e.ok()).collect();
-    sorted.sort_by_key(|e| e.file_name());
+    sort_entries_dirs_first(&mut sorted);
 
     for child in sorted {
         let name = child.file_name().to_string_lossy().to_string();
@@ -303,6 +312,16 @@ pub async fn show_in_folder(path: String) -> AppResult<()> {
             .spawn()
             .map_err(|e| crate::errors::AppError::General(e.to_string()))?;
     }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn write_file_content(path: String, content: String) -> AppResult<()> {
+    // 确保父目录存在
+    if let Some(parent) = std::path::Path::new(&path).parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, &content)?;
     Ok(())
 }
 

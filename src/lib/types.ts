@@ -70,6 +70,13 @@ export interface GitBranchInfo {
   is_detached: boolean;
 }
 
+export interface BranchListItem {
+  name: string;
+  is_current: boolean;
+  is_remote: boolean;
+  upstream: string | null;
+}
+
 export interface StreamChunk {
   delta: string;
   done: boolean;

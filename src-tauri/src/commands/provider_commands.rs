@@ -28,8 +28,9 @@ pub async fn send_message(
     // Route to the correct provider adapter
     match provider.as_str() {
         "anthropic" => {
+            let url = base_url.unwrap_or_else(|| providers::default_base_url("anthropic"));
             providers::anthropic::stream_chat(
-                app, client, &api_key, &model, &mode, &messages, &thread_id, rx,
+                app, client, &api_key, &url, &model, &mode, &messages, &thread_id, rx,
             )
             .await?;
         }
@@ -71,7 +72,8 @@ pub async fn test_api_key(
     let client = state.http_client.read().unwrap().clone();
     match provider.as_str() {
         "anthropic" => {
-            providers::anthropic::test_connection(&client, &api_key).await
+            let url = base_url.unwrap_or_else(|| providers::default_base_url("anthropic"));
+            providers::anthropic::test_connection(&client, &api_key, &url).await
         }
         _ => {
             let url = base_url.unwrap_or_else(|| providers::default_base_url(&provider));
