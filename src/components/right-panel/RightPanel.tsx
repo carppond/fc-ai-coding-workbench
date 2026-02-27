@@ -193,6 +193,34 @@ export function RightPanel() {
     };
   }, [activeProject, refresh, scheduleNext]);
 
+  // 拖拽分割：直接操作 DOM，不加 wrapper，不触发 re-render
+  // 必须放在条件 return 之前（React Hooks 规则）
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const handle = e.currentTarget as HTMLElement;
+    const statusEl = handle.previousElementSibling as HTMLElement;
+    if (!statusEl) return;
+    const startY = e.clientY;
+    const startH = statusEl.getBoundingClientRect().height;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const h = Math.max(40, startH + ev.clientY - startY);
+      statusEl.style.flex = `0 0 ${h}px`;
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  }, []);
+
   if (!activeProject) {
     return (
       <div className="panel panel--right" style={{ display: "flex", flexDirection: "column" }}>
@@ -230,6 +258,9 @@ export function RightPanel() {
       </div>
       <GitOverview />
       <GitStatusList />
+      <div className="git-resize-handle" onMouseDown={handleDragStart}>
+        <div className="git-resize-handle__bar" />
+      </div>
       <GitDiffView />
       <GitLog />
       <GitActions />

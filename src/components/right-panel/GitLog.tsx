@@ -1,6 +1,7 @@
+import { useState } from "react";
 import { useGitStore } from "../../stores/gitStore";
 import { useI18n } from "../../lib/i18n";
-import { GitCommitHorizontal } from "lucide-react";
+import { GitCommitHorizontal, ChevronDown, ChevronRight } from "lucide-react";
 
 function relativeTime(ts: number, locale: string): string {
   const now = Date.now();
@@ -27,30 +28,34 @@ function relativeTime(ts: number, locale: string): string {
 export function GitLog() {
   const logEntries = useGitStore((s) => s.logEntries);
   const { t, locale } = useI18n();
+  const [collapsed, setCollapsed] = useState(false);
 
   return (
-    <div className="git-log">
-      <div className="git-log__header">
+    <div className={`git-log ${collapsed ? "git-log--collapsed" : ""}`}>
+      <div className="git-log__header" onClick={() => setCollapsed(!collapsed)}>
+        {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
         <GitCommitHorizontal size={13} />
         <span>{t("git.log")}</span>
       </div>
-      {logEntries.length === 0 ? (
-        <div className="git-log__empty">{t("git.noCommits")}</div>
-      ) : (
-        <div className="git-log__list">
-          {logEntries.map((entry) => (
-            <div key={entry.hash} className="git-log__entry">
-              <span className="git-log__hash">{entry.hash}</span>
-              <span className="git-log__message">{entry.message}</span>
-              <span className="git-log__meta">
-                <span className="git-log__author">{entry.author}</span>
-                <span className="git-log__time">
-                  {relativeTime(entry.timestamp, locale)}
+      {!collapsed && (
+        logEntries.length === 0 ? (
+          <div className="git-log__empty">{t("git.noCommits")}</div>
+        ) : (
+          <div className="git-log__list">
+            {logEntries.map((entry) => (
+              <div key={entry.hash} className="git-log__entry">
+                <span className="git-log__hash">{entry.hash}</span>
+                <span className="git-log__message">{entry.message}</span>
+                <span className="git-log__meta">
+                  <span className="git-log__author">{entry.author}</span>
+                  <span className="git-log__time">
+                    {relativeTime(entry.timestamp, locale)}
+                  </span>
                 </span>
-              </span>
-            </div>
-          ))}
-        </div>
+              </div>
+            ))}
+          </div>
+        )
       )}
     </div>
   );

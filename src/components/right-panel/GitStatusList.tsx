@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { CheckCircle2, Circle, Plus, Minus, Undo2 } from "lucide-react";
+import { CheckCircle2, Circle, Plus, Minus, Undo2, ChevronDown, ChevronRight } from "lucide-react";
 import { useGitStore } from "../../stores/gitStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useI18n } from "../../lib/i18n";
@@ -23,6 +23,8 @@ export function GitStatusList() {
 
   const [expandedStaged, setExpandedStaged] = useState(false);
   const [expandedUnstaged, setExpandedUnstaged] = useState(false);
+  const [collapsedStaged, setCollapsedStaged] = useState(false);
+  const [collapsedUnstaged, setCollapsedUnstaged] = useState(false);
 
   const staged = useMemo(() => fileStatuses.filter((f) => f.staged), [fileStatuses]);
   const unstaged = useMemo(() => fileStatuses.filter((f) => !f.staged), [fileStatuses]);
@@ -112,115 +114,135 @@ export function GitStatusList() {
     <div className="git-status-list">
       {staged.length > 0 && (
         <div className="git-status-list__section">
-          <div className="git-status-list__section-title git-status-list__section-title--staged">
+          <div
+            className="git-status-list__section-title git-status-list__section-title--staged"
+            onClick={() => setCollapsedStaged(!collapsedStaged)}
+          >
+            {collapsedStaged ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
             <CheckCircle2 size={12} />
             <span style={{ flex: 1 }}>{t("git.staged")} ({staged.length})</span>
-            <button
-              className="git-status-list__section-btn"
-              onClick={() => activeProject && unstageAll(activeProject.path)}
-              title={t("git.unstageAll")}
-            >
-              <Minus size={12} />
-            </button>
-          </div>
-          {visibleStaged.map((f) => (
-            <div
-              key={`s-${f.path}`}
-              className={`git-file-entry ${isSelected(f.path, true) ? "git-file-entry--selected" : ""}`}
-              onClick={() => handleSelect(f.path, true)}
-            >
-              <span className="git-file-entry__staged-icon git-file-entry__staged-icon--yes">
-                <CheckCircle2 size={13} />
-              </span>
-              <span className={`git-file-entry__status ${statusClass(f.status)}`}>
-                {statusLetter(f.status)}
-              </span>
-              <span className="git-file-entry__path">{f.path}</span>
+            {!collapsedStaged && (
               <button
-                className="git-file-entry__action"
-                onClick={(e) => handleUnstage(e, f.path)}
-                title={t("git.unstage")}
+                className="git-status-list__section-btn"
+                onClick={(e) => { e.stopPropagation(); activeProject && unstageAll(activeProject.path); }}
+                title={t("git.unstageAll")}
               >
-                <Minus size={13} />
+                <Minus size={12} />
               </button>
-            </div>
-          ))}
-          {hiddenStagedCount > 0 && (
-            <button
-              className="git-status-list__toggle"
-              onClick={() => setExpandedStaged(true)}
-            >
-              {t("git.showMore").replace("{count}", String(hiddenStagedCount))}
-            </button>
-          )}
-          {expandedStaged && staged.length > VISIBLE_LIMIT && (
-            <button
-              className="git-status-list__toggle"
-              onClick={() => setExpandedStaged(false)}
-            >
-              {t("git.showLess")}
-            </button>
+            )}
+          </div>
+          {!collapsedStaged && (
+            <>
+              {visibleStaged.map((f) => (
+                <div
+                  key={`s-${f.path}`}
+                  className={`git-file-entry ${isSelected(f.path, true) ? "git-file-entry--selected" : ""}`}
+                  onClick={() => handleSelect(f.path, true)}
+                >
+                  <span className="git-file-entry__staged-icon git-file-entry__staged-icon--yes">
+                    <CheckCircle2 size={13} />
+                  </span>
+                  <span className={`git-file-entry__status ${statusClass(f.status)}`}>
+                    {statusLetter(f.status)}
+                  </span>
+                  <span className="git-file-entry__path">{f.path}</span>
+                  <button
+                    className="git-file-entry__action"
+                    onClick={(e) => handleUnstage(e, f.path)}
+                    title={t("git.unstage")}
+                  >
+                    <Minus size={13} />
+                  </button>
+                </div>
+              ))}
+              {hiddenStagedCount > 0 && (
+                <button
+                  className="git-status-list__toggle"
+                  onClick={() => setExpandedStaged(true)}
+                >
+                  {t("git.showMore").replace("{count}", String(hiddenStagedCount))}
+                </button>
+              )}
+              {expandedStaged && staged.length > VISIBLE_LIMIT && (
+                <button
+                  className="git-status-list__toggle"
+                  onClick={() => setExpandedStaged(false)}
+                >
+                  {t("git.showLess")}
+                </button>
+              )}
+            </>
           )}
         </div>
       )}
 
       {unstaged.length > 0 && (
         <div className="git-status-list__section">
-          <div className="git-status-list__section-title git-status-list__section-title--changes">
+          <div
+            className="git-status-list__section-title git-status-list__section-title--changes"
+            onClick={() => setCollapsedUnstaged(!collapsedUnstaged)}
+          >
+            {collapsedUnstaged ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
             <Circle size={12} />
             <span style={{ flex: 1 }}>{t("git.changes")} ({unstaged.length})</span>
-            <button
-              className="git-status-list__section-btn"
-              onClick={() => activeProject && stageAll(activeProject.path)}
-              title={t("git.stageAll")}
-            >
-              <Plus size={12} />
-            </button>
+            {!collapsedUnstaged && (
+              <button
+                className="git-status-list__section-btn"
+                onClick={(e) => { e.stopPropagation(); activeProject && stageAll(activeProject.path); }}
+                title={t("git.stageAll")}
+              >
+                <Plus size={12} />
+              </button>
+            )}
           </div>
-          {visibleUnstaged.map((f) => (
-            <div
-              key={`u-${f.path}`}
-              className={`git-file-entry ${isSelected(f.path, false) ? "git-file-entry--selected" : ""}`}
-              onClick={() => handleSelect(f.path, false)}
-            >
-              <span className="git-file-entry__staged-icon git-file-entry__staged-icon--no">
-                <Circle size={13} />
-              </span>
-              <span className={`git-file-entry__status ${statusClass(f.status)}`}>
-                {statusLetter(f.status)}
-              </span>
-              <span className="git-file-entry__path">{f.path}</span>
-              <button
-                className="git-file-entry__action"
-                onClick={(e) => handleDiscard(e, f.path)}
-                title={t("git.discard")}
-              >
-                <Undo2 size={13} />
-              </button>
-              <button
-                className="git-file-entry__action"
-                onClick={(e) => handleStage(e, f.path)}
-                title={t("git.stage")}
-              >
-                <Plus size={13} />
-              </button>
-            </div>
-          ))}
-          {hiddenUnstagedCount > 0 && (
-            <button
-              className="git-status-list__toggle"
-              onClick={() => setExpandedUnstaged(true)}
-            >
-              {t("git.showMore").replace("{count}", String(hiddenUnstagedCount))}
-            </button>
-          )}
-          {expandedUnstaged && unstaged.length > VISIBLE_LIMIT && (
-            <button
-              className="git-status-list__toggle"
-              onClick={() => setExpandedUnstaged(false)}
-            >
-              {t("git.showLess")}
-            </button>
+          {!collapsedUnstaged && (
+            <>
+              {visibleUnstaged.map((f) => (
+                <div
+                  key={`u-${f.path}`}
+                  className={`git-file-entry ${isSelected(f.path, false) ? "git-file-entry--selected" : ""}`}
+                  onClick={() => handleSelect(f.path, false)}
+                >
+                  <span className="git-file-entry__staged-icon git-file-entry__staged-icon--no">
+                    <Circle size={13} />
+                  </span>
+                  <span className={`git-file-entry__status ${statusClass(f.status)}`}>
+                    {statusLetter(f.status)}
+                  </span>
+                  <span className="git-file-entry__path">{f.path}</span>
+                  <button
+                    className="git-file-entry__action"
+                    onClick={(e) => handleDiscard(e, f.path)}
+                    title={t("git.discard")}
+                  >
+                    <Undo2 size={13} />
+                  </button>
+                  <button
+                    className="git-file-entry__action"
+                    onClick={(e) => handleStage(e, f.path)}
+                    title={t("git.stage")}
+                  >
+                    <Plus size={13} />
+                  </button>
+                </div>
+              ))}
+              {hiddenUnstagedCount > 0 && (
+                <button
+                  className="git-status-list__toggle"
+                  onClick={() => setExpandedUnstaged(true)}
+                >
+                  {t("git.showMore").replace("{count}", String(hiddenUnstagedCount))}
+                </button>
+              )}
+              {expandedUnstaged && unstaged.length > VISIBLE_LIMIT && (
+                <button
+                  className="git-status-list__toggle"
+                  onClick={() => setExpandedUnstaged(false)}
+                >
+                  {t("git.showLess")}
+                </button>
+              )}
+            </>
           )}
         </div>
       )}

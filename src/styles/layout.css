@@ -880,12 +880,33 @@
   font-weight: 500;
 }
 
+/* 拖拽分割手柄 */
+.git-resize-handle {
+  flex-shrink: 0;
+  height: 6px;
+  cursor: row-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.git-resize-handle__bar {
+  width: 32px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--border);
+  transition: background var(--transition-fast);
+}
+
+.git-resize-handle:hover .git-resize-handle__bar {
+  background: var(--accent);
+}
+
 .git-status-list {
   padding: 8px;
   overflow-y: auto;
-  flex: 0 1 auto;
+  flex: 1 1 0;
   min-height: 0;
-  max-height: 35vh;
 }
 
 .git-status-list__section {
@@ -902,6 +923,13 @@
   letter-spacing: 0.3px;
   color: var(--text-muted);
   padding: 6px 10px 4px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition-fast);
+}
+
+.git-status-list__section-title:hover {
+  background: var(--bg-hover);
 }
 
 .git-status-list__section-title--staged {
@@ -924,7 +952,7 @@
   transition: opacity var(--transition-fast), background var(--transition-fast);
 }
 
-.git-status-list__section:hover .git-status-list__section-btn {
+.git-status-list__section-title:hover .git-status-list__section-btn {
   opacity: 1;
 }
 
@@ -1042,6 +1070,35 @@
   color: var(--text-primary);
 }
 
+/* 可折叠区域通用头部 */
+.git-collapsible-bar {
+  display: flex;
+  gap: 4px;
+  padding: 4px 8px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.git-collapsible-bar__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-xs);
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.git-collapsible-bar__toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
 /* Git diff */
 .git-diff-view {
   flex: 1;
@@ -1052,7 +1109,6 @@
   line-height: 1.6;
   white-space: pre;
   background: var(--bg-tertiary);
-  border-top: 1px solid var(--border);
 }
 
 .git-diff-view__line--file-header {
@@ -1085,6 +1141,10 @@
   flex-shrink: 0;
 }
 
+.git-log--collapsed {
+  max-height: none;
+}
+
 .git-log__header {
   display: flex;
   align-items: center;
@@ -1096,6 +1156,12 @@
   letter-spacing: 0.3px;
   color: var(--text-muted);
   flex-shrink: 0;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.git-log__header:hover {
+  background: var(--bg-hover);
 }
 
 .git-log__empty {

@@ -17,6 +17,7 @@ export function GitDiffView({ onSendToAI }: GitDiffViewProps) {
   const clearSelectedFile = useGitStore((s) => s.clearSelectedFile);
   const { t } = useI18n();
   const [tab, setTab] = useState<"workdir" | "staged">("workdir");
+  const [collapsed, setCollapsed] = useState(false);
 
   // If a file is selected, show its diff; otherwise show the full diff for the active tab
   const isFileSelected = selectedFile !== null;
@@ -27,16 +28,14 @@ export function GitDiffView({ onSendToAI }: GitDiffViewProps) {
       : diffStagedText;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-      <div
-        style={{
-          display: "flex",
-          gap: 4,
-          padding: "4px 8px",
-          borderBottom: "1px solid var(--border)",
-          alignItems: "center",
-        }}
-      >
+    <div style={{ display: "flex", flexDirection: "column", flex: collapsed ? "0 0 auto" : 1, minHeight: 0 }}>
+      <div className="git-collapsible-bar">
+        <button
+          className="git-collapsible-bar__toggle"
+          onClick={() => setCollapsed(!collapsed)}
+        >
+          {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+        </button>
         {isFileSelected ? (
           <>
             <span
@@ -103,15 +102,17 @@ export function GitDiffView({ onSendToAI }: GitDiffViewProps) {
           </>
         )}
       </div>
-      <div className="git-diff-view">
-        {diffContent ? (
-          <DiffLines content={diffContent} />
-        ) : (
-          <div style={{ color: "var(--text-muted)", padding: 16 }}>
-            {t("git.noDiff")}
-          </div>
-        )}
-      </div>
+      {!collapsed && (
+        <div className="git-diff-view">
+          {diffContent ? (
+            <DiffLines content={diffContent} />
+          ) : (
+            <div style={{ color: "var(--text-muted)", padding: 16 }}>
+              {t("git.noDiff")}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
