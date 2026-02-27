@@ -11,8 +11,9 @@ import { syntaxHighlighting as cmSyntaxHighlighting, indentOnInput, bracketMatch
 import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 
-import { appEditorTheme, appHighlightStyle } from "./editorTheme";
+import { appEditorTheme, appHighlightStyle, fontSizeCompartment, editorFontSizeExtension } from "./editorTheme";
 import { getLanguageExtension } from "./editorLanguages";
+import { useSettingsStore } from "../../stores/settingsStore";
 
 export function FileViewer() {
   const openFilePath = useFileStore((s) => s.openFilePath);
@@ -24,6 +25,7 @@ export function FileViewer() {
   const markDirty = useFileStore((s) => s.markDirty);
   const saveFile = useFileStore((s) => s.saveFile);
   const { t } = useI18n();
+  const editorFontSize = useSettingsStore((s) => s.editorFontSize);
 
   const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico"]);
   const isImage = useMemo(() => {
@@ -124,6 +126,7 @@ export function FileViewer() {
           }
         }),
         appEditorTheme,
+        editorFontSizeExtension(useSettingsStore.getState().editorFontSize),
       );
 
       const state = EditorState.create({
@@ -162,6 +165,17 @@ export function FileViewer() {
       }
     };
   }, [openFilePath, openFileContent, openFileLine, markDirty]);
+
+  // 动态更新编辑器字体大小
+  useEffect(() => {
+    if (viewRef.current) {
+      viewRef.current.dispatch({
+        effects: fontSizeCompartment.reconfigure(
+          EditorView.theme({ "&": { fontSize: editorFontSize + "px" } })
+        ),
+      });
+    }
+  }, [editorFontSize]);
 
   const handleCopyPath = async () => {
     if (!openFilePath) return;

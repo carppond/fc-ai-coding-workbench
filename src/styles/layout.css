@@ -581,7 +581,7 @@
 }
 
 .message-item__content {
-  font-size: 14px;
+  font-size: var(--chat-font-size, 14px);
   line-height: 1.7;
   color: var(--text-primary);
   word-break: break-word;
@@ -2931,6 +2931,132 @@
 .proxy-settings__hint svg {
   flex-shrink: 0;
   margin-top: 1px;
+}
+
+/* ========================================
+   Font Size Settings
+   ======================================== */
+.font-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.font-settings__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.font-settings__label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  min-width: 48px;
+}
+
+.font-settings__control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.font-settings__slider {
+  flex: 1;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--border);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.font-settings__slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+.font-settings__slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+.font-settings__value {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 32px;
+  text-align: right;
+  font-family: var(--font-mono, "SF Mono", monospace);
+}
+
+/* ========================================
+   Shortcuts Reference
+   ======================================== */
+.shortcuts-ref {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.shortcuts-ref__group {
+  background: var(--bg-primary, var(--bg-secondary));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  overflow: hidden;
+}
+
+.shortcuts-ref__group-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 6px 10px;
+  background: var(--bg-hover);
+  border-bottom: 1px solid var(--border);
+}
+
+.shortcuts-ref__list {
+  display: flex;
+  flex-direction: column;
+}
+
+.shortcuts-ref__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+}
+
+.shortcuts-ref__item:last-child {
+  border-bottom: none;
+}
+
+.shortcuts-ref__kbd {
+  font-family: var(--font-mono, "SF Mono", "Menlo", monospace);
+  font-size: 10.5px;
+  font-weight: 500;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  white-space: nowrap;
+  box-shadow: 0 1px 0 var(--border);
+}
+
+.shortcuts-ref__desc {
+  font-size: 11.5px;
+  color: var(--text-secondary);
 }
 
 /* ========================================

@@ -160,6 +160,115 @@ function ClaudeResumeSettings({ platform }: { platform: string }) {
   );
 }
 
+function FontSizeSettings() {
+  const { t } = useI18n();
+  const editorFontSize = useSettingsStore((s) => s.editorFontSize);
+  const terminalFontSize = useSettingsStore((s) => s.terminalFontSize);
+  const chatFontSize = useSettingsStore((s) => s.chatFontSize);
+  const setEditorFontSize = useSettingsStore((s) => s.setEditorFontSize);
+  const setTerminalFontSize = useSettingsStore((s) => s.setTerminalFontSize);
+  const setChatFontSize = useSettingsStore((s) => s.setChatFontSize);
+
+  const controls = [
+    { label: t("fontSize.editor"), value: editorFontSize, onChange: setEditorFontSize },
+    { label: t("fontSize.terminal"), value: terminalFontSize, onChange: setTerminalFontSize },
+    { label: t("fontSize.chat"), value: chatFontSize, onChange: setChatFontSize },
+  ];
+
+  return (
+    <div className="font-settings">
+      {controls.map(({ label, value, onChange }) => (
+        <div key={label} className="font-settings__row">
+          <label className="font-settings__label">{label}</label>
+          <div className="font-settings__control">
+            <input
+              type="range"
+              min={10}
+              max={24}
+              step={1}
+              value={value}
+              onChange={(e) => onChange(Number(e.target.value))}
+              className="font-settings__slider"
+            />
+            <span className="font-settings__value">{value}px</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ShortcutsReference() {
+  const { t } = useI18n();
+  const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent);
+  const mod = isMac ? "Command" : "Ctrl";
+  const shift = "Shift";
+
+  const groups = [
+    {
+      title: t("shortcuts.global"),
+      items: [
+        { keys: `${mod} + P`, desc: t("shortcuts.quickOpen") },
+        { keys: `${mod} + N`, desc: t("shortcuts.newSession") },
+        { keys: `${mod} + Enter`, desc: t("shortcuts.send") },
+        { keys: `${mod} + K`, desc: t("shortcuts.focusSearch") },
+        { keys: "Escape", desc: t("shortcuts.close") },
+      ],
+    },
+    {
+      title: t("shortcuts.editor"),
+      items: [
+        { keys: `${mod} + S`, desc: t("shortcuts.save") },
+        { keys: "Tab", desc: t("shortcuts.indent") },
+        { keys: `${mod} + Z`, desc: t("shortcuts.undo") },
+        { keys: `${shift} + ${mod} + Z`, desc: t("shortcuts.redo") },
+        { keys: `${mod} + F`, desc: t("shortcuts.find") },
+      ],
+    },
+    {
+      title: t("shortcuts.terminal"),
+      items: [
+        { keys: `${mod} + F`, desc: t("shortcuts.termSearch") },
+        { keys: `${mod} + K`, desc: t("shortcuts.termClear") },
+        { keys: `${mod} + C`, desc: t("shortcuts.termCopy") },
+        { keys: `${mod} + V`, desc: t("shortcuts.termPaste") },
+        { keys: `${shift} + Enter`, desc: t("shortcuts.termNewline") },
+      ],
+    },
+    {
+      title: t("shortcuts.chat"),
+      items: [
+        { keys: "Enter", desc: t("shortcuts.chatSend") },
+        { keys: `${shift} + Enter`, desc: t("shortcuts.chatNewline") },
+      ],
+    },
+    {
+      title: t("shortcuts.git"),
+      items: [
+        { keys: `${mod} + Enter`, desc: t("shortcuts.gitCommit") },
+      ],
+    },
+  ];
+
+  return (
+    <div className="shortcuts-ref">
+      {groups.map((group) => (
+        <div key={group.title} className="shortcuts-ref__group">
+          <div className="shortcuts-ref__group-title">{group.title}</div>
+          <div className="shortcuts-ref__list">
+            {group.items.map((item) => (
+              <div key={item.keys + item.desc} className="shortcuts-ref__item">
+                <span className="shortcuts-ref__desc">{item.desc}</span>
+                <kbd className="shortcuts-ref__kbd">{item.keys}</kbd>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function TopBar() {
   const { openProject } = useProjectStore();
   const { loading, theme, cycleTheme, envCache } = useSettingsStore();
@@ -256,6 +365,18 @@ export function TopBar() {
                   {t("settings.environment")}
                 </div>
                 <EnvironmentSetup compact preloadedEnv={envCache} />
+              </div>
+              <div className="settings-dialog__section">
+                <div className="settings-dialog__section-title">
+                  {t("fontSize.title")}
+                </div>
+                <FontSizeSettings />
+              </div>
+              <div className="settings-dialog__section">
+                <div className="settings-dialog__section-title">
+                  {t("shortcuts.title")}
+                </div>
+                <ShortcutsReference />
               </div>
             </div>
           </div>

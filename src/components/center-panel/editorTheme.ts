@@ -1,14 +1,26 @@
 import { EditorView } from "@codemirror/view";
+import { Compartment } from "@codemirror/state";
 import { HighlightStyle } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 
 /**
+ * 字体大小 Compartment，支持动态调整
+ */
+export const fontSizeCompartment = new Compartment();
+
+export function editorFontSizeExtension(size: number) {
+  return fontSizeCompartment.of(
+    EditorView.theme({ "&": { fontSize: size + "px" } })
+  );
+}
+
+/**
  * 基于 CSS 变量的 CodeMirror 主题，自动适配 14 套主题
+ * 注：字体大小由 fontSizeCompartment 动态控制
  */
 export const appEditorTheme = EditorView.theme({
   "&": {
     height: "100%",
-    fontSize: "13px",
     fontFamily: "'Menlo', 'Monaco', 'Consolas', 'Liberation Mono', 'Courier New', monospace",
   },
   ".cm-content": {

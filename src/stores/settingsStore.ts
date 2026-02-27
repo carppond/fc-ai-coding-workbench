@@ -23,6 +23,9 @@ interface SettingsState {
   activeModel: string;
   activeMode: string;
   theme: Theme;
+  editorFontSize: number;
+  terminalFontSize: number;
+  chatFontSize: number;
   onboardingComplete: boolean;
   loading: boolean;
   envCache: EnvCheckResult | null;
@@ -35,6 +38,9 @@ interface SettingsState {
   setActiveMode: (mode: string) => Promise<void>;
   setTheme: (theme: Theme) => Promise<void>;
   cycleTheme: () => void;
+  setEditorFontSize: (size: number) => Promise<void>;
+  setTerminalFontSize: (size: number) => Promise<void>;
+  setChatFontSize: (size: number) => Promise<void>;
   setOnboardingComplete: (complete: boolean) => Promise<void>;
   saveProviders: (providers: ProviderConfig[]) => Promise<void>;
   hasApiKey: (provider: string) => Promise<boolean>;
@@ -49,6 +55,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   activeModel: "claude-sonnet-4",
   activeMode: "code",
   theme: "mocha" as Theme,
+  editorFontSize: 13,
+  terminalFontSize: 14,
+  chatFontSize: 14,
   onboardingComplete: false,
   loading: true,
   envCache: null,
@@ -71,17 +80,29 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   loadSettings: async () => {
     set({ loading: true });
     try {
-      const [providersVal, providerVal, modelVal, modeVal, themeVal, onboardingVal] = await Promise.all([
+      const [providersVal, providerVal, modelVal, modeVal, themeVal, onboardingVal, editorFsVal, terminalFsVal, chatFsVal] = await Promise.all([
         ipc.getSetting("providers"),
         ipc.getSetting("active_provider"),
         ipc.getSetting("active_model"),
         ipc.getSetting("active_mode"),
         ipc.getSetting("theme"),
         ipc.getSetting("onboarding_complete"),
+        ipc.getSetting("editor_font_size"),
+        ipc.getSetting("terminal_font_size"),
+        ipc.getSetting("chat_font_size"),
       ]);
 
       const theme = (THEME_ORDER.includes(themeVal as Theme) ? themeVal : "mocha") as Theme;
       document.documentElement.setAttribute("data-theme", theme);
+
+      const clampFs = (v: unknown, def: number) => {
+        const n = typeof v === "number" ? v : def;
+        return Math.max(10, Math.min(24, n));
+      };
+      const editorFontSize = clampFs(editorFsVal, 13);
+      const terminalFontSize = clampFs(terminalFsVal, 14);
+      const chatFontSize = clampFs(chatFsVal, 14);
+      document.documentElement.style.setProperty("--chat-font-size", chatFontSize + "px");
 
       set({
         providers: (providersVal as ProviderConfig[]) || DEFAULT_PROVIDERS,
@@ -89,6 +110,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         activeModel: (modelVal as string) || "claude-sonnet-4",
         activeMode: (modeVal as string) || "code",
         theme,
+        editorFontSize,
+        terminalFontSize,
+        chatFontSize,
         onboardingComplete: (onboardingVal as boolean) || false,
         loading: false,
       });
@@ -130,6 +154,22 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const idx = THEME_ORDER.indexOf(current);
     const next = THEME_ORDER[(idx + 1) % THEME_ORDER.length];
     get().setTheme(next);
+  },
+
+  setEditorFontSize: async (size) => {
+    set({ editorFontSize: size });
+    await ipc.setSetting("editor_font_size", size);
+  },
+
+  setTerminalFontSize: async (size) => {
+    set({ terminalFontSize: size });
+    await ipc.setSetting("terminal_font_size", size);
+  },
+
+  setChatFontSize: async (size) => {
+    document.documentElement.style.setProperty("--chat-font-size", size + "px");
+    set({ chatFontSize: size });
+    await ipc.setSetting("chat_font_size", size);
   },
 
   setOnboardingComplete: async (complete) => {

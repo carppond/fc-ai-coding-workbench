@@ -259,6 +259,38 @@ const translations: Record<Locale, Record<string, string>> = {
     "git.stashDropConfirm": "确定删除此贮藏条目？此操作不可恢复。",
     "git.stashNothingToSave": "没有可贮藏的更改",
 
+    // Font Size
+    "fontSize.title": "字体大小",
+    "fontSize.editor": "编辑器",
+    "fontSize.terminal": "终端",
+    "fontSize.chat": "聊天",
+
+    // Shortcuts Reference
+    "shortcuts.title": "快捷键",
+    "shortcuts.global": "全局",
+    "shortcuts.editor": "编辑器",
+    "shortcuts.terminal": "终端",
+    "shortcuts.chat": "聊天",
+    "shortcuts.git": "Git",
+    "shortcuts.quickOpen": "快速打开文件",
+    "shortcuts.newSession": "新建会话",
+    "shortcuts.send": "发送消息",
+    "shortcuts.focusSearch": "聚焦搜索",
+    "shortcuts.close": "关闭/取消",
+    "shortcuts.save": "保存文件",
+    "shortcuts.indent": "缩进",
+    "shortcuts.undo": "撤销",
+    "shortcuts.redo": "重做",
+    "shortcuts.find": "查找",
+    "shortcuts.termSearch": "搜索终端",
+    "shortcuts.termClear": "清除终端",
+    "shortcuts.termCopy": "复制选中/中断",
+    "shortcuts.termPaste": "粘贴",
+    "shortcuts.termNewline": "输入换行",
+    "shortcuts.chatSend": "发送消息",
+    "shortcuts.chatNewline": "输入换行",
+    "shortcuts.gitCommit": "提交",
+
     // Guide
     "guide.title": "记忆指南",
 
@@ -515,6 +547,38 @@ const translations: Record<Locale, Record<string, string>> = {
     "git.stashDropped": "Stash dropped",
     "git.stashDropConfirm": "Drop this stash entry? This cannot be undone.",
     "git.stashNothingToSave": "Nothing to stash",
+
+    // Font Size
+    "fontSize.title": "Font Size",
+    "fontSize.editor": "Editor",
+    "fontSize.terminal": "Terminal",
+    "fontSize.chat": "Chat",
+
+    // Shortcuts Reference
+    "shortcuts.title": "Keyboard Shortcuts",
+    "shortcuts.global": "Global",
+    "shortcuts.editor": "Editor",
+    "shortcuts.terminal": "Terminal",
+    "shortcuts.chat": "Chat",
+    "shortcuts.git": "Git",
+    "shortcuts.quickOpen": "Quick Open File",
+    "shortcuts.newSession": "New Session",
+    "shortcuts.send": "Send Message",
+    "shortcuts.focusSearch": "Focus Search",
+    "shortcuts.close": "Close / Cancel",
+    "shortcuts.save": "Save File",
+    "shortcuts.indent": "Indent",
+    "shortcuts.undo": "Undo",
+    "shortcuts.redo": "Redo",
+    "shortcuts.find": "Find",
+    "shortcuts.termSearch": "Search Terminal",
+    "shortcuts.termClear": "Clear Terminal",
+    "shortcuts.termCopy": "Copy Selection / Interrupt",
+    "shortcuts.termPaste": "Paste",
+    "shortcuts.termNewline": "Newline",
+    "shortcuts.chatSend": "Send Message",
+    "shortcuts.chatNewline": "Newline",
+    "shortcuts.gitCommit": "Commit",
 
     // Guide
     "guide.title": "Memory Guide",
