@@ -18,7 +18,9 @@ A desktop coding assistant integrating AI chat, Git workflow, and terminal, buil
 
 ## Screenshots
 
-![ShiGuang AI Coding Platform](screenshot.jpg)
+| Main Interface | Memory Guide | Settings |
+|:-:|:-:|:-:|
+| ![Main Interface](screenshot/screenshot01.jpg) | ![Memory Guide](screenshot/screenshot02.jpg) | ![Settings](screenshot/screenshot03.jpg) |
 
 ## Tech Stack
 

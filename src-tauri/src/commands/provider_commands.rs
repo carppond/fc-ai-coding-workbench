@@ -113,9 +113,11 @@ pub async fn generate_commit_message(
     );
 
     // 使用 claude -p 非交互模式，不创建对话历史
+    // macOS GUI 应用 PATH 不含 Homebrew/npm 全局路径，需要用 user_shell_path()
     let output = tokio::process::Command::new("claude")
         .args(["-p", &prompt])
         .current_dir(&project_path)
+        .env("PATH", crate::commands::setup_commands::user_shell_path())
         .output()
         .await
         .map_err(|e| AppError::Provider(format!("Failed to run claude CLI: {}", e)))?;

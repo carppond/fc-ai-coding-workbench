@@ -18,7 +18,9 @@
 
 ## 截图
 
-![拾光 AI 编程平台](screenshot.jpg)
+| 主界面 | Memory Guide 引导 | 设置页面 |
+|:-:|:-:|:-:|
+| ![主界面](screenshot/screenshot01.jpg) | ![Memory Guide 引导](screenshot/screenshot02.jpg) | ![设置页面](screenshot/screenshot03.jpg) |
 
 ## 技术栈
 
