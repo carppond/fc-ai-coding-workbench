@@ -6,6 +6,8 @@ use std::sync::OnceLock;
 
 #[derive(Debug, Serialize, Clone)]
 pub struct EnvCheckResult {
+    pub git_installed: bool,
+    pub git_version: Option<String>,
     pub node_installed: bool,
     pub node_version: Option<String>,
     pub npm_installed: bool,
@@ -161,6 +163,7 @@ pub fn check_environment() -> AppResult<EnvCheckResult> {
     let _ = user_shell_path();
 
     // Phase 1: run all version checks in parallel
+    let h_git = thread::spawn(|| run_version_cmd("git", &["--version"]));
     let h_node = thread::spawn(|| run_version_cmd("node", &["--version"]));
     let h_npm = thread::spawn(|| run_version_cmd("npm", &["--version"]));
     let h_brew = thread::spawn(|| {
@@ -172,6 +175,7 @@ pub fn check_environment() -> AppResult<EnvCheckResult> {
     });
     let h_claude = thread::spawn(|| run_version_cmd("claude", &["--version"]));
 
+    let git_version = h_git.join().unwrap_or(None);
     let node_version = h_node.join().unwrap_or(None);
     let npm_version = h_npm.join().unwrap_or(None);
     let brew_installed = h_brew.join().unwrap_or(None).is_some();
@@ -226,6 +230,8 @@ pub fn check_environment() -> AppResult<EnvCheckResult> {
     .to_string();
 
     Ok(EnvCheckResult {
+        git_installed: git_version.is_some(),
+        git_version,
         node_installed: node_version.is_some(),
         node_version,
         npm_installed: npm_version.is_some(),
@@ -260,6 +266,8 @@ pub async fn run_install_command(
     use tauri::Emitter;
 
     let (program, args): (&str, Vec<&str>) = match (command_type.as_str(), method.as_str()) {
+        ("install_git", "brew") => ("brew", vec!["install", "git"]),
+        ("install_git", "xcode") => ("xcode-select", vec!["--install"]),
         ("install_node", "brew") => ("brew", vec!["install", "node"]),
         ("install_cli", "npm") => ("npm", vec!["install", "-g", "@anthropic-ai/claude-code"]),
         ("install_cli", "brew") => ("brew", vec!["install", "claude"]),

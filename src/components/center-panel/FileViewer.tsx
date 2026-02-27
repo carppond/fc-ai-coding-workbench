@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { X, Copy, Check, Save } from "lucide-react";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { useFileStore } from "../../stores/fileStore";
 import { useI18n } from "../../lib/i18n";
 
@@ -23,6 +24,13 @@ export function FileViewer() {
   const markDirty = useFileStore((s) => s.markDirty);
   const saveFile = useFileStore((s) => s.saveFile);
   const { t } = useI18n();
+
+  const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico"]);
+  const isImage = useMemo(() => {
+    if (!openFilePath) return false;
+    const ext = openFilePath.split(".").pop()?.toLowerCase() || "";
+    return IMAGE_EXTS.has(ext);
+  }, [openFilePath]);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -182,7 +190,7 @@ export function FileViewer() {
               {t("fileViewer.saved")}
             </span>
           )}
-          {isDirty && (
+          {!isImage && isDirty && (
             <button
               className="btn btn--ghost btn--sm"
               onClick={handleSave}
@@ -208,7 +216,17 @@ export function FileViewer() {
           </button>
         </div>
       </div>
-      <div className="file-viewer__editor" ref={containerRef} />
+      {isImage ? (
+        <div className="file-viewer__image-container">
+          <img
+            src={convertFileSrc(openFilePath)}
+            alt={openFilePath.split("/").pop() || ""}
+            className="file-viewer__image"
+          />
+        </div>
+      ) : (
+        <div className="file-viewer__editor" ref={containerRef} />
+      )}
     </div>
   );
 }

@@ -36,6 +36,15 @@ function SkeletonCards() {
           <div className="env-skeleton env-skeleton--version" />
         </div>
       </div>
+      <div className="env-card env-card--skeleton">
+        <div className="env-card__header">
+          <div className="env-card__status">
+            <div className="env-skeleton env-skeleton--icon" />
+            <div className="env-skeleton env-skeleton--text" />
+          </div>
+          <div className="env-skeleton env-skeleton--version" />
+        </div>
+      </div>
     </div>
   );
 }
@@ -135,13 +144,62 @@ export function EnvironmentSetup({ compact = false, preloadedEnv }: EnvironmentS
   if (!env) return null;
 
   const isMac = env.platform === "macos";
+  const gitReady = env.git_installed;
   const nodeReady = env.node_installed;
   const cliReady = env.claude_installed;
 
   return (
     <div className={`env-setup ${compact ? "env-setup--compact" : ""}`}>
+      {/* Git Card */}
+      <div className={`env-card env-card--fade-in ${gitReady ? "env-card--ok" : "env-card--missing"}`}>
+        <div className="env-card__header">
+          <div className="env-card__status">
+            {gitReady ? (
+              <CheckCircle size={18} className="env-card__icon env-card__icon--ok" />
+            ) : (
+              <XCircle size={18} className="env-card__icon env-card__icon--missing" />
+            )}
+            <span className="env-card__name">Git</span>
+          </div>
+          {gitReady && env.git_version && (
+            <span className="env-card__version">{env.git_version}</span>
+          )}
+        </div>
+
+        {!gitReady && (
+          <div className="env-card__actions">
+            {isMac && env.brew_installed ? (
+              <button
+                className="btn btn--sm btn--primary"
+                disabled={installing}
+                onClick={() => runCommand("install_git", "brew")}
+              >
+                <Download size={14} />
+                {installTarget === "install_git" ? t("env.installing") : t("env.installViaBrew")}
+              </button>
+            ) : isMac ? (
+              <button
+                className="btn btn--sm btn--primary"
+                disabled={installing}
+                onClick={() => runCommand("install_git", "xcode")}
+              >
+                <Download size={14} />
+                {installTarget === "install_git" ? t("env.installing") : t("env.installXcodeTools")}
+              </button>
+            ) : null}
+            <button
+              className="btn btn--sm btn--ghost"
+              onClick={() => window.open("https://git-scm.com/downloads", "_blank")}
+            >
+              <ExternalLink size={14} />
+              {t("env.openGitScm")}
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* Node.js Card */}
-      <div className={`env-card env-card--fade-in ${nodeReady ? "env-card--ok" : "env-card--missing"}`}>
+      <div className={`env-card env-card--fade-in ${nodeReady ? "env-card--ok" : "env-card--missing"}`} style={{ animationDelay: "0.05s" }}>
         <div className="env-card__header">
           <div className="env-card__status">
             {nodeReady ? (
@@ -184,7 +242,7 @@ export function EnvironmentSetup({ compact = false, preloadedEnv }: EnvironmentS
       </div>
 
       {/* Claude CLI Card */}
-      <div className={`env-card env-card--fade-in ${cliReady ? "env-card--ok" : "env-card--missing"}`} style={{ animationDelay: "0.05s" }}>
+      <div className={`env-card env-card--fade-in ${cliReady ? "env-card--ok" : "env-card--missing"}`} style={{ animationDelay: "0.1s" }}>
         <div className="env-card__header">
           <div className="env-card__status">
             {cliReady ? (

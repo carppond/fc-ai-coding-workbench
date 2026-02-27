@@ -312,6 +312,8 @@ export const setClaudeResumeEnabled = (enabled: boolean) =>
 // --- Setup ---
 
 export interface EnvCheckResult {
+  git_installed: boolean;
+  git_version: string | null;
   node_installed: boolean;
   node_version: string | null;
   npm_installed: boolean;

@@ -175,6 +175,8 @@ const translations: Record<Locale, Record<string, string>> = {
     "env.detectRefresh": "重新检测",
     "env.installedVia": "安装方式:",
     "env.needNodeFirst": "需要先安装 Node.js",
+    "env.installXcodeTools": "安装 Xcode 命令行工具",
+    "env.openGitScm": "前往 git-scm.com 下载",
 
     // Settings panel
     "settings.title": "设置",
@@ -430,6 +432,8 @@ const translations: Record<Locale, Record<string, string>> = {
     "env.detectRefresh": "Re-detect",
     "env.installedVia": "Installed via:",
     "env.needNodeFirst": "Node.js must be installed first",
+    "env.installXcodeTools": "Install Xcode Command Line Tools",
+    "env.openGitScm": "Download from git-scm.com",
 
     // Settings panel
     "settings.title": "Settings",

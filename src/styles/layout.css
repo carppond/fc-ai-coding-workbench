@@ -2362,6 +2362,25 @@
   border-bottom: 1px solid var(--border);
 }
 
+.file-viewer__image-container {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg-primary);
+}
+
+.file-viewer__image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
+}
+
 .file-viewer__editor {
   flex: 1;
   min-height: 0;

@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, memo } from "react";
-import { ChevronRight, ChevronDown, Folder, FileText, Loader } from "lucide-react";
+import { ChevronRight, ChevronDown, Folder, FileText, Loader, FileCode, FileJson, Image, Terminal, Database, Lock, Package, Settings, BookOpen } from "lucide-react";
 import type { DirEntry } from "../../lib/types";
 import { useFileStore } from "../../stores/fileStore";
 import { useI18n } from "../../lib/i18n";
@@ -20,6 +20,56 @@ interface ContextMenuState {
 
 // Shared context menu state - only one menu open at a time
 let globalCloseMenu: (() => void) | null = null;
+
+/** 根据文件名返回对应的图标和颜色 */
+function getFileIcon(name: string): { icon: React.ReactNode; color: string } {
+  const lower = name.toLowerCase();
+  const ext = lower.split(".").pop() || "";
+
+  // 特殊文件名
+  if (lower === "package.json" || lower === "cargo.toml") return { icon: <Package size={14} />, color: "#e8ab53" };
+  if (lower === "dockerfile" || lower.startsWith("docker-compose")) return { icon: <Package size={14} />, color: "#2496ed" };
+  if (lower.startsWith(".env")) return { icon: <Lock size={14} />, color: "#ecd53f" };
+  if (lower.startsWith(".git")) return { icon: <Settings size={14} />, color: "#f05033" };
+  if (lower.endsWith(".lock") || lower === "yarn.lock") return { icon: <Lock size={14} />, color: "#8b8b8b" };
+  if (lower.endsWith("config.js") || lower.endsWith("config.ts") || lower.endsWith(".config.mjs") || lower.endsWith("rc.json") || lower.endsWith("rc.js")) return { icon: <Settings size={14} />, color: "#8b8b8b" };
+
+  switch (ext) {
+    // JavaScript / TypeScript
+    case "js": case "mjs": case "cjs": case "jsx": return { icon: <FileCode size={14} />, color: "#f1e05a" };
+    case "ts": case "mts": case "cts": case "tsx": return { icon: <FileCode size={14} />, color: "#3178c6" };
+    // Web
+    case "html": case "htm": return { icon: <FileCode size={14} />, color: "#e44d26" };
+    case "css": return { icon: <FileCode size={14} />, color: "#563d7c" };
+    case "scss": case "sass": case "less": return { icon: <FileCode size={14} />, color: "#c6538c" };
+    // Data
+    case "json": case "jsonc": return { icon: <FileJson size={14} />, color: "#e8ab53" };
+    case "yaml": case "yml": return { icon: <FileCode size={14} />, color: "#cb171e" };
+    case "toml": return { icon: <FileCode size={14} />, color: "#9c4121" };
+    case "xml": case "plist": case "storyboard": case "xib": return { icon: <FileCode size={14} />, color: "#e44d26" };
+    case "sql": return { icon: <Database size={14} />, color: "#e38c00" };
+    // Systems
+    case "rs": return { icon: <FileCode size={14} />, color: "#dea584" };
+    case "go": return { icon: <FileCode size={14} />, color: "#00add8" };
+    case "py": case "pyw": return { icon: <FileCode size={14} />, color: "#3572a5" };
+    case "rb": return { icon: <FileCode size={14} />, color: "#cc342d" };
+    case "java": case "kt": case "kts": return { icon: <FileCode size={14} />, color: "#b07219" };
+    case "c": case "h": return { icon: <FileCode size={14} />, color: "#555555" };
+    case "cpp": case "cc": case "cxx": case "hpp": return { icon: <FileCode size={14} />, color: "#f34b7d" };
+    case "m": case "mm": return { icon: <FileCode size={14} />, color: "#438eff" };
+    case "swift": return { icon: <FileCode size={14} />, color: "#f05138" };
+    case "php": return { icon: <FileCode size={14} />, color: "#4f5d95" };
+    // Shell
+    case "sh": case "bash": case "zsh": case "fish": return { icon: <Terminal size={14} />, color: "#89e051" };
+    // Docs
+    case "md": case "mdx": return { icon: <BookOpen size={14} />, color: "#519aba" };
+    case "txt": case "log": return { icon: <FileText size={14} />, color: "#8b8b8b" };
+    // Images
+    case "png": case "jpg": case "jpeg": case "gif": case "svg": case "ico": case "webp": case "bmp": return { icon: <Image size={14} />, color: "#a074c4" };
+    // Default
+    default: return { icon: <FileText size={14} />, color: "var(--text-muted)" };
+  }
+}
 
 export const FileTreeItem = memo(function FileTreeItem({ entry, depth, defaultExpanded }: FileTreeItemProps) {
   const expandedPaths = useFileStore((s) => s.expandedPaths);
@@ -193,8 +243,8 @@ export const FileTreeItem = memo(function FileTreeItem({ entry, depth, defaultEx
         ) : (
           <span className="file-tree-item__chevron" style={{ width: 14 }} />
         )}
-        <span className="file-tree-item__icon">
-          {isDir ? <Folder size={14} /> : <FileText size={14} />}
+        <span className="file-tree-item__icon" style={isDir ? undefined : { color: getFileIcon(entry.name).color }}>
+          {isDir ? <Folder size={14} /> : getFileIcon(entry.name).icon}
         </span>
         {editing === "rename" ? (
           <input
@@ -219,7 +269,7 @@ export const FileTreeItem = memo(function FileTreeItem({ entry, depth, defaultEx
         >
           <span className="file-tree-item__chevron" style={{ width: 14 }} />
           <span className="file-tree-item__icon">
-            {editing === "newFolder" ? <Folder size={14} /> : <FileText size={14} />}
+            {editing === "newFolder" ? <Folder size={14} /> : <FileCode size={14} />}
           </span>
           <input
             ref={inputRef}
