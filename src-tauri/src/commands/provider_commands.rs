@@ -113,18 +113,37 @@ pub async fn generate_commit_message(
     );
 
     // 使用 claude -p 非交互模式，不创建对话历史
-    // macOS GUI 应用 PATH 不含 Homebrew/npm 全局路径，需要用 user_shell_path()
-    let output = tokio::process::Command::new("claude")
-        .args(["-p", &prompt])
+    // macOS 打包 .app 从 Finder/Dock 启动时环境变量不完整，
+    // 通过登录 shell (-l) 运行，自动 source 用户的 shell 配置文件以获取完整环境
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let mut cmd = tokio::process::Command::new(&shell);
+    // 将 prompt 通过环境变量传递，避免 shell 转义问题
+    cmd.args(["-l", "-c", "claude -p \"$__CLAUDE_PROMPT__\""])
         .current_dir(&project_path)
-        .env("PATH", crate::commands::setup_commands::user_shell_path())
-        .output()
+        .env("__CLAUDE_PROMPT__", &prompt)
+        .env("HOME", dirs::home_dir().unwrap_or_default())
+        .env("TERM", "xterm-256color");
+    for (k, v) in crate::proxy::env_pairs() {
+        cmd.env(k, v);
+    }
+    let output = cmd.output()
         .await
         .map_err(|e| AppError::Provider(format!("Failed to run claude CLI: {}", e)))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(AppError::Provider(format!("claude CLI error: {}", stderr)));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let detail = if !stderr.is_empty() { stderr } else { stdout };
+        let home = dirs::home_dir().map(|p| p.display().to_string()).unwrap_or_else(|| "(none)".into());
+        let diag = format!(
+            "claude CLI error: {}\n\n[诊断信息]\nSHELL: {}\nHOME: {}\nPATH: {}\nexit_code: {:?}",
+            detail.trim(),
+            shell,
+            home,
+            crate::commands::setup_commands::user_shell_path(),
+            output.status.code(),
+        );
+        return Err(AppError::Provider(diag));
     }
 
     let result = String::from_utf8_lossy(&output.stdout).trim().to_string();

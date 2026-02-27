@@ -3768,6 +3768,7 @@ name = "shiguangAI"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "dirs",
  "eventsource-stream",
  "futures-util",
  "git2",
