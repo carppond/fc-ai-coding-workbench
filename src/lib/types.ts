@@ -77,6 +77,12 @@ export interface BranchListItem {
   upstream: string | null;
 }
 
+export interface StashEntry {
+  index: number;
+  message: string;
+  timestamp: number;
+}
+
 export interface StreamChunk {
   delta: string;
   done: boolean;

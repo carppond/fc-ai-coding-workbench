@@ -104,3 +104,25 @@ pub async fn git_delete_branch(
 ) -> AppResult<()> {
     git::delete_branch(&project_path, &branch_name, force)
 }
+
+// ========== Stash ==========
+
+#[tauri::command]
+pub async fn git_stash_list(project_path: String) -> AppResult<Vec<git::StashEntry>> {
+    git::stash_list(&project_path)
+}
+
+#[tauri::command]
+pub async fn git_stash_save(project_path: String, message: Option<String>) -> AppResult<()> {
+    git::stash_save(&project_path, message.as_deref())
+}
+
+#[tauri::command]
+pub async fn git_stash_apply(project_path: String, index: usize) -> AppResult<()> {
+    git::stash_apply(&project_path, index)
+}
+
+#[tauri::command]
+pub async fn git_stash_drop(project_path: String, index: usize) -> AppResult<()> {
+    git::stash_drop(&project_path, index)
+}

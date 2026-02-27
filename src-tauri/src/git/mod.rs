@@ -1,5 +1,5 @@
 use crate::errors::{AppError, AppResult};
-use git2::{DiffOptions, Repository, StatusOptions};
+use git2::{DiffOptions, Repository, StashFlags, StatusOptions};
 use serde::Serialize;
 
 #[derive(Debug, Serialize, Clone)]
@@ -766,6 +766,65 @@ pub fn create_branch(project_path: &str, branch_name: &str) -> AppResult<()> {
     let head = repo.head()?;
     let commit = head.peel_to_commit()?;
     repo.branch(branch_name, &commit, false)?;
+    Ok(())
+}
+
+// ========== Stash 管理 ==========
+
+#[derive(Debug, Serialize, Clone)]
+pub struct StashEntry {
+    pub index: usize,
+    pub message: String,
+    pub timestamp: i64,
+}
+
+/// 列出所有 stash 条目
+pub fn stash_list(project_path: &str) -> AppResult<Vec<StashEntry>> {
+    let mut repo = Repository::open(project_path)?;
+    let mut raw_entries: Vec<(usize, String, git2::Oid)> = Vec::new();
+
+    repo.stash_foreach(|index, message, oid| {
+        raw_entries.push((index, message.to_string(), *oid));
+        true
+    })?;
+
+    let entries = raw_entries
+        .into_iter()
+        .map(|(index, message, oid)| {
+            let timestamp = repo
+                .find_commit(oid)
+                .map(|c| c.time().seconds() * 1000)
+                .unwrap_or(0);
+            StashEntry { index, message, timestamp }
+        })
+        .collect();
+
+    Ok(entries)
+}
+
+/// 保存当前工作区到 stash
+pub fn stash_save(project_path: &str, message: Option<&str>) -> AppResult<()> {
+    let repo = Repository::open(project_path)?;
+    let sig = repo.signature()?;
+    let msg = message.unwrap_or("WIP");
+
+    // 需要 &mut repo
+    let mut repo = repo;
+    repo.stash_save(&sig, msg, Some(StashFlags::INCLUDE_UNTRACKED))?;
+    Ok(())
+}
+
+/// 应用 stash（保留 stash 条目）
+pub fn stash_apply(project_path: &str, index: usize) -> AppResult<()> {
+    let mut repo = Repository::open(project_path)?;
+    repo.stash_apply(index, None)?;
+    Ok(())
+}
+
+/// 删除 stash 条目
+pub fn stash_drop(project_path: &str, index: usize) -> AppResult<()> {
+    let mut repo = Repository::open(project_path)?;
+    repo.stash_drop(index)?;
     Ok(())
 }
 

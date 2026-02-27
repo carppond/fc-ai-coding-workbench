@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { GitFileStatus, GitBranchInfo, GitLogEntry, BranchListItem } from "../lib/types";
+import type { GitFileStatus, GitBranchInfo, GitLogEntry, BranchListItem, StashEntry } from "../lib/types";
 import * as ipc from "../ipc/commands";
 
 function extractErrorMessage(e: unknown): string {
@@ -19,6 +19,7 @@ interface GitState {
   branchInfo: GitBranchInfo | null;
   logEntries: GitLogEntry[];
   branches: BranchListItem[];
+  stashEntries: StashEntry[];
   diffText: string;
   diffStagedText: string;
   selectedFile: SelectedFile | null;
@@ -40,6 +41,10 @@ interface GitState {
   checkoutBranch: (projectPath: string, branchName: string) => Promise<boolean>;
   createBranch: (projectPath: string, branchName: string) => Promise<boolean>;
   deleteBranch: (projectPath: string, branchName: string, force: boolean) => Promise<boolean>;
+  loadStash: (projectPath: string) => Promise<void>;
+  stashSave: (projectPath: string, message?: string) => Promise<boolean>;
+  stashApply: (projectPath: string, index: number) => Promise<boolean>;
+  stashDrop: (projectPath: string, index: number) => Promise<boolean>;
   selectFile: (projectPath: string, filePath: string, staged: boolean) => Promise<void>;
   reloadSelectedFileDiff: (projectPath: string) => Promise<void>;
   clearSelectedFile: () => void;
@@ -66,6 +71,7 @@ export const useGitStore = create<GitState>((set, get) => ({
   branchInfo: null,
   logEntries: [],
   branches: [],
+  stashEntries: [],
   diffText: "",
   diffStagedText: "",
   selectedFile: null,
@@ -141,7 +147,16 @@ export const useGitStore = create<GitState>((set, get) => ({
       }
     };
 
-    await Promise.all([loadDiff(), loadDiffStaged(), loadLog()]);
+    const loadStash = async () => {
+      try {
+        const entries = await ipc.gitStashList(projectPath);
+        if (!signal.aborted) set({ stashEntries: entries });
+      } catch {
+        if (!signal.aborted) set({ stashEntries: [] });
+      }
+    };
+
+    await Promise.all([loadDiff(), loadDiffStaged(), loadLog(), loadStash()]);
 
     // Reload selected file diff if it still exists
     if (signal.aborted) return;
@@ -251,6 +266,58 @@ export const useGitStore = create<GitState>((set, get) => ({
       await ipc.gitDeleteBranch(projectPath, branchName, force);
       set({ operating: false });
       get().loadBranches(projectPath);
+      return true;
+    } catch (e: unknown) {
+      set({ error: extractErrorMessage(e), operating: false });
+      return false;
+    }
+  },
+
+  loadStash: async (projectPath) => {
+    try {
+      const entries = await ipc.gitStashList(projectPath);
+      set({ stashEntries: entries });
+    } catch {
+      set({ stashEntries: [] });
+    }
+  },
+
+  stashSave: async (projectPath, message) => {
+    if (get().operating) return false;
+    set({ operating: true, error: null });
+    try {
+      await ipc.gitStashSave(projectPath, message);
+      set({ operating: false });
+      get().refresh(projectPath);
+      get().loadStash(projectPath);
+      return true;
+    } catch (e: unknown) {
+      set({ error: extractErrorMessage(e), operating: false });
+      return false;
+    }
+  },
+
+  stashApply: async (projectPath, index) => {
+    if (get().operating) return false;
+    set({ operating: true, error: null });
+    try {
+      await ipc.gitStashApply(projectPath, index);
+      set({ operating: false });
+      get().refresh(projectPath);
+      return true;
+    } catch (e: unknown) {
+      set({ error: extractErrorMessage(e), operating: false });
+      return false;
+    }
+  },
+
+  stashDrop: async (projectPath, index) => {
+    if (get().operating) return false;
+    set({ operating: true, error: null });
+    try {
+      await ipc.gitStashDrop(projectPath, index);
+      set({ operating: false });
+      get().loadStash(projectPath);
       return true;
     } catch (e: unknown) {
       set({ error: extractErrorMessage(e), operating: false });
@@ -444,6 +511,7 @@ export const useGitStore = create<GitState>((set, get) => ({
       branchInfo: null,
       logEntries: [],
       branches: [],
+      stashEntries: [],
       diffText: "",
       diffStagedText: "",
       selectedFile: null,

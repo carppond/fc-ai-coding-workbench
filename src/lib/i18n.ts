@@ -242,6 +242,21 @@ const translations: Record<Locale, Record<string, string>> = {
     "fileViewer.unsavedChanges": "文件有未保存的更改，确定关闭？",
     "fileViewer.dontSave": "不保存",
 
+    // Quick Open
+    "quickOpen.placeholder": "输入文件名搜索... (Cmd+P)",
+    "quickOpen.noResults": "未找到匹配文件",
+
+    // Git Stash
+    "git.stash": "贮藏",
+    "git.stashSave": "贮藏",
+    "git.stashApply": "应用",
+    "git.stashDrop": "删除",
+    "git.stashSaved": "更改已贮藏",
+    "git.stashApplied": "贮藏已应用",
+    "git.stashDropped": "贮藏已删除",
+    "git.stashDropConfirm": "确定删除此贮藏条目？此操作不可恢复。",
+    "git.stashNothingToSave": "没有可贮藏的更改",
+
     // Guide
     "guide.title": "记忆指南",
 
@@ -481,6 +496,21 @@ const translations: Record<Locale, Record<string, string>> = {
     "fileViewer.saved": "Saved",
     "fileViewer.unsavedChanges": "File has unsaved changes. Close anyway?",
     "fileViewer.dontSave": "Don't Save",
+
+    // Quick Open
+    "quickOpen.placeholder": "Search file by name... (Cmd+P)",
+    "quickOpen.noResults": "No matching files",
+
+    // Git Stash
+    "git.stash": "Stash",
+    "git.stashSave": "Stash",
+    "git.stashApply": "Apply",
+    "git.stashDrop": "Drop",
+    "git.stashSaved": "Changes stashed",
+    "git.stashApplied": "Stash applied",
+    "git.stashDropped": "Stash dropped",
+    "git.stashDropConfirm": "Drop this stash entry? This cannot be undone.",
+    "git.stashNothingToSave": "Nothing to stash",
 
     // Guide
     "guide.title": "Memory Guide",

@@ -9,6 +9,7 @@ import { GitStatusList } from "./GitStatusList";
 import { GitDiffView } from "./GitDiffView";
 import { GitLog } from "./GitLog";
 import { GitActions } from "./GitActions";
+import { GitStash } from "./GitStash";
 
 function isValidGitUrl(url: string): boolean {
   const trimmed = url.trim();
@@ -263,6 +264,7 @@ export function RightPanel() {
       </div>
       <GitDiffView />
       <GitLog />
+      <GitStash />
       <GitActions />
     </div>
   );

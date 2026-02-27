@@ -94,6 +94,10 @@ pub fn run() {
             commands::git_commands::git_checkout_branch,
             commands::git_commands::git_create_branch,
             commands::git_commands::git_delete_branch,
+            commands::git_commands::git_stash_list,
+            commands::git_commands::git_stash_save,
+            commands::git_commands::git_stash_apply,
+            commands::git_commands::git_stash_drop,
             // Project commands
             commands::project_commands::read_directory_tree,
             commands::project_commands::read_directory_children,
@@ -102,6 +106,7 @@ pub fn run() {
             commands::project_commands::create_file_or_dir,
             commands::project_commands::rename_entry,
             commands::project_commands::delete_entry,
+            commands::project_commands::list_all_files,
             commands::project_commands::search_in_files,
             commands::project_commands::show_in_folder,
             // Env commands

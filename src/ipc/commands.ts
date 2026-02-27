@@ -9,6 +9,7 @@ import type {
   GitLogEntry,
   GitBranchInfo,
   BranchListItem,
+  StashEntry,
   ChatMessage,
 } from "../lib/types";
 
@@ -239,6 +240,20 @@ export const gitDeleteBranch = (projectPath: string, branchName: string, force: 
 export const generateCommitMessage = (projectPath: string) =>
   invoke<string>("generate_commit_message", { projectPath });
 
+// --- Git Stash ---
+
+export const gitStashList = (projectPath: string) =>
+  invoke<StashEntry[]>("git_stash_list", { projectPath });
+
+export const gitStashSave = (projectPath: string, message?: string) =>
+  invoke<void>("git_stash_save", { projectPath, message });
+
+export const gitStashApply = (projectPath: string, index: number) =>
+  invoke<void>("git_stash_apply", { projectPath, index });
+
+export const gitStashDrop = (projectPath: string, index: number) =>
+  invoke<void>("git_stash_drop", { projectPath, index });
+
 // --- Project filesystem ---
 
 export const readDirectoryTree = (path: string, maxDepth?: number) =>
@@ -273,6 +288,9 @@ export const searchInFiles = (projectPath: string, query: string, maxResults?: n
 
 export const showInFolder = (path: string) =>
   invoke<void>("show_in_folder", { path });
+
+export const listAllFiles = (projectPath: string) =>
+  invoke<string[]>("list_all_files", { projectPath });
 
 // --- Env ---
 

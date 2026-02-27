@@ -325,6 +325,39 @@ pub async fn write_file_content(path: String, content: String) -> AppResult<()> 
     Ok(())
 }
 
+/// 列出项目下所有文件的相对路径（用于快速打开）
+#[tauri::command]
+pub async fn list_all_files(project_path: String) -> AppResult<Vec<String>> {
+    let root = std::path::Path::new(&project_path);
+    let mut files = Vec::new();
+
+    fn walk(dir: &std::path::Path, root: &std::path::Path, files: &mut Vec<String>) {
+        let read_dir = match std::fs::read_dir(dir) {
+            Ok(rd) => rd,
+            Err(_) => return,
+        };
+        for entry in read_dir.filter_map(|e| e.ok()) {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if SKIP_DIRS.contains(&name.as_str()) || name.starts_with('.') {
+                continue;
+            }
+            let path = entry.path();
+            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            if is_dir {
+                walk(&path, root, files);
+            } else {
+                if let Ok(rel) = path.strip_prefix(root) {
+                    files.push(rel.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+
+    walk(root, root, &mut files);
+    files.sort();
+    Ok(files)
+}
+
 #[tauri::command]
 pub fn read_file_content(path: String, max_size: Option<u64>) -> AppResult<String> {
     let max = max_size.unwrap_or(1_000_000); // 1MB default

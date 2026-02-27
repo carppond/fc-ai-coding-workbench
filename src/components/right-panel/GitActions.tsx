@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2, Sparkles, Archive } from "lucide-react";
 import { useGitStore } from "../../stores/gitStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useI18n } from "../../lib/i18n";
@@ -16,6 +16,7 @@ export function GitActions() {
   const operationType = useGitStore((s) => s.operationType);
   const generating = useGitStore((s) => s.generating);
   const genCommitMsg = useGitStore((s) => s.generateCommitMessage);
+  const stashSave = useGitStore((s) => s.stashSave);
   const error = useGitStore((s) => s.error);
   const clearError = useGitStore((s) => s.clearError);
   const fileStatuses = useGitStore((s) => s.fileStatuses);
@@ -72,6 +73,18 @@ export function GitActions() {
     const ok = await genCommitMsg(activeProject.path);
     if (!ok) {
       toast(t("git.noStagedForAI"), "error");
+    }
+  };
+
+  const handleStash = async () => {
+    if (!activeProject) return;
+    if (!hasUncommitted) {
+      toast(t("git.stashNothingToSave"), "error");
+      return;
+    }
+    const ok = await stashSave(activeProject.path);
+    if (ok) {
+      toast(t("git.stashSaved"), "success");
     }
   };
 
@@ -134,6 +147,15 @@ export function GitActions() {
         >
           {operationType === "push" ? <Loader2 size={13} className="spin" /> : null}
           {t("git.push")}
+        </button>
+        <button
+          className="btn btn--ghost btn--sm"
+          onClick={handleStash}
+          disabled={operating || !hasUncommitted}
+          title={t("git.stashSave")}
+        >
+          <Archive size={13} />
+          {t("git.stashSave")}
         </button>
       </div>
     </div>
