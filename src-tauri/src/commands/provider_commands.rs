@@ -1,7 +1,55 @@
 use crate::errors::{AppError, AppResult};
 use crate::providers;
 use crate::state::AppState;
+use std::collections::HashMap;
+use std::sync::OnceLock;
 use tauri::{AppHandle, State};
+
+/// 后台预加载 shell 环境变量，应用启动时异步获取，使用时等待结果
+static SHELL_ENV: OnceLock<HashMap<String, String>> = OnceLock::new();
+
+/// 启动时调用，后台线程获取 shell 环境
+pub fn preload_shell_env() {
+    std::thread::spawn(|| {
+        let _ = SHELL_ENV.get_or_init(capture_shell_env);
+    });
+}
+
+fn capture_shell_env() -> HashMap<String, String> {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let home = dirs::home_dir().unwrap_or_default();
+    let output = std::process::Command::new(&shell)
+        .args(["-lc", "source ~/.zshrc >/dev/null 2>&1; env"])
+        .env("HOME", &home)
+        .env("TERM", "dumb")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output();
+
+    match output {
+        Ok(o) => {
+            let text = String::from_utf8_lossy(&o.stdout);
+            let mut env = HashMap::new();
+            for line in text.lines() {
+                if let Some((k, v)) = line.split_once('=') {
+                    if k == "_" || k == "SHLVL" || k == "PWD" || k == "OLDPWD" {
+                        continue;
+                    }
+                    env.insert(k.to_string(), v.to_string());
+                }
+            }
+            env.entry("HOME".to_string()).or_insert_with(|| home.display().to_string());
+            env.entry("TERM".to_string()).or_insert_with(|| "dumb".to_string());
+            env
+        }
+        Err(_) => std::env::vars().collect(),
+    }
+}
+
+/// 获取缓存的 shell 环境，如果后台还没完成则等待
+fn cached_shell_env() -> &'static HashMap<String, String> {
+    SHELL_ENV.get_or_init(capture_shell_env)
+}
 
 #[tauri::command]
 pub async fn send_message(
@@ -91,8 +139,8 @@ pub async fn generate_commit_message(
         return Err(AppError::Provider("No staged changes".to_string()));
     }
 
-    // 截断过大的 diff，避免超出 token 限制
-    let max_len = 15000;
+    // 截断过大的 diff，减少 API 响应时间
+    let max_len = 6000;
     let truncated_diff = if diff.len() > max_len {
         format!("{}...\n\n(diff truncated)", &diff[..max_len])
     } else {
@@ -113,18 +161,14 @@ pub async fn generate_commit_message(
     );
 
     // 使用 claude -p 非交互模式，不创建对话历史
-    // macOS 打包 .app 从 Finder/Dock 启动时环境变量不完整，
-    // 通过登录 shell (-l) 运行，自动 source 用户的 shell 配置文件以获取完整环境
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-    let mut cmd = tokio::process::Command::new(&shell);
-    // 将 prompt 通过环境变量传递，避免 shell 转义问题
-    // source .zshrc 输出重定向到 /dev/null 防止 shell 插件产生控制序列
-    // TERM=dumb 抑制颜色/光标等转义码
-    cmd.args(["-l", "-c", "source ~/.zshrc >/dev/null 2>&1; claude -p \"$__CLAUDE_PROMPT__\""])
+    // 使用懒加载的 shell 环境缓存，首次调用时获取一次，后续直接复用
+    let mut cmd = tokio::process::Command::new("claude");
+    cmd.args(["-p", &prompt])
         .current_dir(&project_path)
-        .env("__CLAUDE_PROMPT__", &prompt)
-        .env("HOME", dirs::home_dir().unwrap_or_default())
-        .env("TERM", "dumb");
+        .env_clear()
+        .envs(cached_shell_env())
+        .env("TERM", "dumb")
+        .env_remove("CLAUDECODE");
     for (k, v) in crate::proxy::env_pairs() {
         cmd.env(k, v);
     }
@@ -136,29 +180,7 @@ pub async fn generate_commit_message(
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
         let detail = if !stderr.is_empty() { stderr } else { stdout };
-        let home = dirs::home_dir().map(|p| p.display().to_string()).unwrap_or_else(|| "(none)".into());
-        // 在同一个 shell 环境内运行诊断命令
-        let diag_cmd = tokio::process::Command::new(&shell)
-            .args(["-l", "-c", "echo \"WHICH=$(which claude 2>&1)\"; echo \"VERSION=$(claude --version 2>&1 || true)\"; echo \"CLAUDE_DIR=$(ls -la ~/.claude/ 2>&1 | head -10)\"; echo \"INNER_HOME=$HOME\"; echo \"INNER_PATH=$PATH\""])
-            .env("HOME", dirs::home_dir().unwrap_or_default())
-            .env("TERM", "xterm-256color")
-            .output()
-            .await;
-        let diag_info = diag_cmd.map(|o| {
-            let out = String::from_utf8_lossy(&o.stdout).to_string();
-            let err = String::from_utf8_lossy(&o.stderr).to_string();
-            format!("{}{}", out, err)
-        }).unwrap_or_else(|e| format!("diag failed: {}", e));
-
-        let diag = format!(
-            "claude CLI error: {}\n\n[诊断信息]\nSHELL: {}\nHOME: {}\nexit_code: {:?}\n\n[Shell 内部环境]\n{}",
-            detail.trim(),
-            shell,
-            home,
-            output.status.code(),
-            diag_info.trim(),
-        );
-        return Err(AppError::Provider(diag));
+        return Err(AppError::Provider(format!("claude CLI error: {}", detail.trim())));
     }
 
     let raw = String::from_utf8_lossy(&output.stdout).to_string();

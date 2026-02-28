@@ -27,6 +27,9 @@ pub fn run() {
             // Clean up leftover temp files from previous sessions (once at startup)
             terminal::TerminalSession::cleanup_stale_temp_files();
 
+            // 后台线程预加载 shell 环境变量（供 claude -p 使用，不阻塞启动）
+            commands::provider_commands::preload_shell_env();
+
             // Set the app icon for the main window (visible in Dock / taskbar during dev)
             if let Some(window) = app.get_webview_window("main") {
                 let icon_bytes = include_bytes!("../icons/icon.png");
