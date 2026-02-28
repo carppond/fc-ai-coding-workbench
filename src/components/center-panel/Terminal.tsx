@@ -9,7 +9,7 @@ import "@xterm/xterm/css/xterm.css";
 import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/700.css";
 import { listen } from "@tauri-apps/api/event";
-import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import * as ipc from "../../ipc/commands";
 import { useSettingsStore, type Theme } from "../../stores/settingsStore";
 
@@ -583,6 +583,7 @@ export const Terminal = memo(function Terminal({ projectPath, onAliveChange, vis
     };
     container.addEventListener("paste", handlePaste, true);
 
+
     // --- Keyboard shortcuts ---
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== "keydown") return true;
@@ -607,8 +608,9 @@ export const Terminal = memo(function Terminal({ projectPath, onAliveChange, vis
         const selection = term.getSelection();
         if (selection) {
           e.preventDefault();
-          writeText(selection).catch(() => navigator.clipboard.writeText(selection));
-          term.clearSelection();
+          e.stopPropagation();
+          // 使用 Web API 复制，不走 Tauri IPC，避免终端失焦导致滚动
+          navigator.clipboard.writeText(selection).catch(() => {});
           return false;
         }
         // Ctrl+C without selection → pass to PTY as SIGINT
@@ -628,6 +630,11 @@ export const Terminal = memo(function Terminal({ projectPath, onAliveChange, vis
       if (e.key === "k" && e.metaKey) {
         e.preventDefault();
         term.clear();
+        return false;
+      }
+
+      // 拦截修饰键单独按下，防止 xterm 内部处理触发 scroll-to-cursor
+      if (e.key === "Meta" || e.key === "Control" || e.key === "Alt" || e.key === "Shift") {
         return false;
       }
 
@@ -729,8 +736,11 @@ export const Terminal = memo(function Terminal({ projectPath, onAliveChange, vis
         .then((result) => {
           if (disposed) return;
           if (result) {
-            // Got a pre-warmed session — use it immediately
+            // Got a pre-warmed session — set up listener first
             setupSession(result[0], result[1]);
+            // warmup 终端已在正确目录启动，发送 Ctrl+L 清屏并重绘 prompt
+            // 不发送 cd 命令，避免命令回显闪烁
+            ipc.writeTerminal(result[0], "\x0c").catch(() => {});
           } else {
             // No warmup available — normal spawn
             return ipc.spawnTerminal(path ?? undefined, term.rows, term.cols)

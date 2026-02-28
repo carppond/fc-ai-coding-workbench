@@ -10,9 +10,9 @@ pub struct TerminalState {
 }
 
 #[tauri::command]
-pub fn spawn_terminal(
+pub async fn spawn_terminal(
     app: AppHandle,
-    state: State<TerminalState>,
+    state: State<'_, TerminalState>,
     initial_dir: Option<String>,
     rows: Option<u16>,
     cols: Option<u16>,
@@ -20,8 +20,13 @@ pub fn spawn_terminal(
     let r = rows.unwrap_or(24);
     let c = cols.unwrap_or(80);
 
-    let session =
-        TerminalSession::spawn(app, initial_dir.as_deref(), r, c).map_err(AppError::General)?;
+    // 在后台线程创建 PTY，避免阻塞 UI
+    let session = tauri::async_runtime::spawn_blocking(move || {
+        TerminalSession::spawn(app, initial_dir.as_deref(), r, c)
+    })
+    .await
+    .map_err(|e| AppError::General(format!("spawn task failed: {}", e)))?
+    .map_err(AppError::General)?;
 
     let session_id = session.id.clone();
     let shell_name = session.shell_name.clone();
@@ -130,7 +135,7 @@ pub async fn warmup_terminal(
 #[tauri::command]
 pub fn claim_warmup_terminal(
     state: State<TerminalState>,
-    initial_dir: Option<String>,
+    _initial_dir: Option<String>,
     rows: Option<u16>,
     cols: Option<u16>,
 ) -> AppResult<Option<(String, String)>> {
@@ -153,11 +158,9 @@ pub fn claim_warmup_terminal(
     let c = cols.unwrap_or(80);
     session.resize(r, c).map_err(AppError::General)?;
 
-    // cd to the requested directory (if different from warmup dir)
-    if let Some(ref dir) = initial_dir {
-        let cmd = build_cd_command(&session.shell_name, dir);
-        session.write(&cmd).map_err(AppError::General)?;
-    }
+    // 不在此处发送 cd 命令——前端需要先挂载 event listener，
+    // 否则 cd+clear 的输出（包括 shell prompt）会在 listener 就绪前丢失。
+    // 前端在 setupSession 后会调用 terminal_cd。
 
     let session_id = session.id.clone();
     let shell_name = session.shell_name.clone();

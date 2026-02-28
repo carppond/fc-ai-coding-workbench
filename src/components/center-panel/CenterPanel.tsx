@@ -58,19 +58,20 @@ export function CenterPanel() {
   }, []);
 
   const handleAddTab = useCallback(() => {
+    if (openFilePath) closeFile();
+    const id = nextTabId();
+    tabCounterRef.current += 1;
     setTabs((prev) => {
       if (prev.length >= MAX_TABS) return prev;
-      tabCounterRef.current += 1;
-      const id = nextTabId();
       const newTab: TerminalTab = {
         id,
         title: `Terminal ${tabCounterRef.current}`,
         alive: true,
       };
-      setActiveTabId(id);
       return [...prev, newTab];
     });
-  }, []);
+    setActiveTabId(id);
+  }, [openFilePath, closeFile]);
 
   const handleCloseTab = useCallback((tabId: string) => {
     setTabs((prev) => {
