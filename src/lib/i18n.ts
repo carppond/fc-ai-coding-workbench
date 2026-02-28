@@ -262,6 +262,20 @@ const translations: Record<Locale, Record<string, string>> = {
     "git.stashDropConfirm": "确定删除此贮藏条目？此操作不可恢复。",
     "git.stashNothingToSave": "没有可贮藏的更改",
 
+    // Git Tag
+    "git.tags": "标签",
+    "git.createTag": "创建标签",
+    "git.deleteTag": "删除标签",
+    "git.pushTag": "推送标签",
+    "git.tagName": "标签名称",
+    "git.tagMessage": "标签消息（可选）",
+    "git.annotatedTag": "注解标签",
+    "git.tagCreated": "标签已创建",
+    "git.tagDeleted": "标签已删除",
+    "git.tagPushed": "标签已推送",
+    "git.deleteTagConfirm": "确定删除标签 \"{name}\"？此操作不可恢复。",
+    "git.noTags": "暂无标签",
+
     // Font Size
     "fontSize.title": "字体大小",
     "fontSize.editor": "编辑器",
@@ -553,6 +567,20 @@ const translations: Record<Locale, Record<string, string>> = {
     "git.stashDropped": "Stash dropped",
     "git.stashDropConfirm": "Drop this stash entry? This cannot be undone.",
     "git.stashNothingToSave": "Nothing to stash",
+
+    // Git Tag
+    "git.tags": "Tags",
+    "git.createTag": "Create Tag",
+    "git.deleteTag": "Delete Tag",
+    "git.pushTag": "Push Tag",
+    "git.tagName": "Tag name",
+    "git.tagMessage": "Tag message (optional)",
+    "git.annotatedTag": "Annotated tag",
+    "git.tagCreated": "Tag created",
+    "git.tagDeleted": "Tag deleted",
+    "git.tagPushed": "Tag pushed",
+    "git.deleteTagConfirm": "Delete tag \"{name}\"? This cannot be undone.",
+    "git.noTags": "No tags",
 
     // Font Size
     "fontSize.title": "Font Size",

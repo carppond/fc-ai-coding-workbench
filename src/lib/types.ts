@@ -83,6 +83,14 @@ export interface StashEntry {
   timestamp: number;
 }
 
+export interface TagEntry {
+  name: string;
+  message: string | null;
+  hash: string;
+  timestamp: number;
+  is_annotated: boolean;
+}
+
 export interface StreamChunk {
   delta: string;
   done: boolean;

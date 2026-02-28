@@ -105,6 +105,33 @@ pub async fn git_delete_branch(
     git::delete_branch(&project_path, &branch_name, force)
 }
 
+// ========== Tag ==========
+
+#[tauri::command]
+pub async fn git_tag_list(project_path: String) -> AppResult<Vec<git::TagEntry>> {
+    git::tag_list(&project_path)
+}
+
+#[tauri::command]
+pub async fn git_create_tag(
+    project_path: String,
+    tag_name: String,
+    message: Option<String>,
+    annotated: Option<bool>,
+) -> AppResult<()> {
+    git::create_tag(&project_path, &tag_name, message.as_deref(), annotated.unwrap_or(false))
+}
+
+#[tauri::command]
+pub async fn git_delete_tag(project_path: String, tag_name: String) -> AppResult<()> {
+    git::delete_tag(&project_path, &tag_name)
+}
+
+#[tauri::command]
+pub async fn git_push_tag(project_path: String, tag_name: String) -> AppResult<String> {
+    git::push_tag(&project_path, &tag_name).await
+}
+
 // ========== Stash ==========
 
 #[tauri::command]

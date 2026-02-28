@@ -828,6 +828,116 @@ pub fn stash_drop(project_path: &str, index: usize) -> AppResult<()> {
     Ok(())
 }
 
+// ========== Tag 管理 ==========
+
+#[derive(Debug, Serialize, Clone)]
+pub struct TagEntry {
+    pub name: String,
+    pub message: Option<String>,
+    pub hash: String,
+    pub timestamp: i64,
+    pub is_annotated: bool,
+}
+
+/// 列出所有 tag
+pub fn tag_list(project_path: &str) -> AppResult<Vec<TagEntry>> {
+    let repo = Repository::open(project_path)?;
+    let tag_names = repo.tag_names(None)?;
+    let mut entries = Vec::new();
+
+    for name in tag_names.iter().flatten() {
+        let refname = format!("refs/tags/{}", name);
+        let reference = match repo.find_reference(&refname) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+
+        let obj = match reference.peel(git2::ObjectType::Any) {
+            Ok(o) => o,
+            Err(_) => continue,
+        };
+
+        // 检查是否为注解 tag
+        if let Ok(tag) = obj.clone().into_tag() {
+            // 注解 tag：从 tag 对象获取信息
+            let target = tag.target().ok().and_then(|t| t.peel_to_commit().ok());
+            let hash = target
+                .as_ref()
+                .map(|c| c.id().to_string())
+                .unwrap_or_else(|| tag.target_id().to_string());
+            let timestamp = tag
+                .tagger()
+                .map(|s| s.when().seconds() * 1000)
+                .unwrap_or(0);
+            entries.push(TagEntry {
+                name: name.to_string(),
+                message: tag.message().map(|m| m.trim().to_string()),
+                hash,
+                timestamp,
+                is_annotated: true,
+            });
+        } else if let Ok(commit) = obj.peel_to_commit() {
+            // 轻量 tag：从 commit 获取信息
+            entries.push(TagEntry {
+                name: name.to_string(),
+                message: None,
+                hash: commit.id().to_string(),
+                timestamp: commit.time().seconds() * 1000,
+                is_annotated: false,
+            });
+        }
+    }
+
+    // 按时间倒序
+    entries.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    Ok(entries)
+}
+
+/// 创建 tag
+pub fn create_tag(
+    project_path: &str,
+    tag_name: &str,
+    message: Option<&str>,
+    annotated: bool,
+) -> AppResult<()> {
+    let repo = Repository::open(project_path)?;
+    let head = repo.head()?.peel_to_commit()?;
+    let obj = head.as_object();
+
+    if annotated {
+        let sig = repo.signature()?;
+        let msg = message.unwrap_or(tag_name);
+        repo.tag(tag_name, obj, &sig, msg, false)?;
+    } else {
+        repo.reference(
+            &format!("refs/tags/{}", tag_name),
+            head.id(),
+            false,
+            &format!("create tag {}", tag_name),
+        )?;
+    }
+    Ok(())
+}
+
+/// 删除 tag
+pub fn delete_tag(project_path: &str, tag_name: &str) -> AppResult<()> {
+    let repo = Repository::open(project_path)?;
+    let refname = format!("refs/tags/{}", tag_name);
+    let mut reference = repo.find_reference(&refname)?;
+    reference.delete()?;
+    Ok(())
+}
+
+/// 推送 tag 到远程
+pub async fn push_tag(project_path: &str, tag_name: &str) -> AppResult<String> {
+    let (ok, stdout, stderr) =
+        run_git(project_path, &["push", "origin", tag_name]).await?;
+    if ok {
+        return Ok(stdout);
+    }
+    Err(AppError::General(stderr))
+}
+
 /// 删除本地分支
 pub fn delete_branch(project_path: &str, branch_name: &str, force: bool) -> AppResult<()> {
     let repo = Repository::open(project_path)?;

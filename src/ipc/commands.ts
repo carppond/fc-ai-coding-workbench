@@ -10,6 +10,7 @@ import type {
   GitBranchInfo,
   BranchListItem,
   StashEntry,
+  TagEntry,
   ChatMessage,
 } from "../lib/types";
 
@@ -253,6 +254,20 @@ export const gitStashApply = (projectPath: string, index: number) =>
 
 export const gitStashDrop = (projectPath: string, index: number) =>
   invoke<void>("git_stash_drop", { projectPath, index });
+
+// --- Git Tag ---
+
+export const gitTagList = (projectPath: string) =>
+  invoke<TagEntry[]>("git_tag_list", { projectPath });
+
+export const gitCreateTag = (projectPath: string, tagName: string, message?: string, annotated?: boolean) =>
+  invoke<void>("git_create_tag", { projectPath, tagName, message, annotated });
+
+export const gitDeleteTag = (projectPath: string, tagName: string) =>
+  invoke<void>("git_delete_tag", { projectPath, tagName });
+
+export const gitPushTag = (projectPath: string, tagName: string) =>
+  invoke<string>("git_push_tag", { projectPath, tagName });
 
 // --- Project filesystem ---
 

@@ -1318,20 +1318,68 @@
 .git-log__header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
+  gap: 2px;
+  padding: 4px 12px;
   font-size: 10px;
   font-weight: 700;
-  text-transform: capitalize;
   letter-spacing: 0.3px;
   color: var(--text-muted);
   flex-shrink: 0;
+}
+
+.git-log__collapse-btn {
+  display: flex;
+  align-items: center;
   cursor: pointer;
+  padding: 4px 2px;
+  border-radius: var(--radius-sm);
   transition: background var(--transition-fast);
 }
 
-.git-log__header:hover {
+.git-log__collapse-btn:hover {
   background: var(--bg-hover);
+}
+
+.git-log__tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.git-log__tab:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.git-log__tab--active {
+  color: var(--text-primary);
+  background: var(--bg-surface);
+}
+
+.git-log__header-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: auto;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.git-log__header-action:hover {
+  background: var(--bg-surface);
+  color: var(--text-primary);
 }
 
 .git-log__empty {
@@ -3416,5 +3464,140 @@
 }
 
 .git-stash__action-btn--danger:hover {
+  color: var(--danger, #f85149);
+}
+
+/* ========================================
+   Git Tags
+   ======================================== */
+.git-tags__create {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+  align-items: center;
+}
+
+.git-tags__input {
+  flex: 1;
+  min-width: 80px;
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.git-tags__input:focus {
+  border-color: var(--accent);
+}
+
+.git-tags__input::placeholder {
+  color: var(--text-muted);
+}
+
+.git-tags__checkbox {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.git-tags__checkbox input {
+  accent-color: var(--accent);
+}
+
+.git-tags__list {
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.git-tags__entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 12px;
+  gap: 8px;
+  transition: background var(--transition-fast);
+}
+
+.git-tags__entry:hover {
+  background: var(--bg-hover);
+}
+
+.git-tags__entry-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.git-tags__entry-name {
+  font-size: 12px;
+  color: var(--text-primary);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.git-tags__entry-meta {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.git-tags__entry-hash {
+  font-family: "SF Mono", "JetBrains Mono", monospace;
+  font-size: 10px;
+}
+
+.git-tags__entry-message {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.git-tags__entry-actions {
+  display: none;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.git-tags__entry:hover .git-tags__entry-actions {
+  display: flex;
+}
+
+.git-tags__action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.git-tags__action-btn:hover {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.git-tags__action-btn--danger:hover {
   color: var(--danger, #f85149);
 }

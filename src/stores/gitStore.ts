@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { GitFileStatus, GitBranchInfo, GitLogEntry, BranchListItem, StashEntry } from "../lib/types";
+import type { GitFileStatus, GitBranchInfo, GitLogEntry, BranchListItem, StashEntry, TagEntry } from "../lib/types";
 import * as ipc from "../ipc/commands";
 
 function extractErrorMessage(e: unknown): string {
@@ -20,6 +20,7 @@ interface GitState {
   logEntries: GitLogEntry[];
   branches: BranchListItem[];
   stashEntries: StashEntry[];
+  tagEntries: TagEntry[];
   diffText: string;
   diffStagedText: string;
   selectedFile: SelectedFile | null;
@@ -45,6 +46,10 @@ interface GitState {
   stashSave: (projectPath: string, message?: string) => Promise<boolean>;
   stashApply: (projectPath: string, index: number) => Promise<boolean>;
   stashDrop: (projectPath: string, index: number) => Promise<boolean>;
+  loadTags: (projectPath: string) => Promise<void>;
+  createTag: (projectPath: string, name: string, message?: string, annotated?: boolean) => Promise<boolean>;
+  deleteTag: (projectPath: string, name: string) => Promise<boolean>;
+  pushTag: (projectPath: string, name: string) => Promise<boolean>;
   selectFile: (projectPath: string, filePath: string, staged: boolean) => Promise<void>;
   reloadSelectedFileDiff: (projectPath: string) => Promise<void>;
   clearSelectedFile: () => void;
@@ -72,6 +77,7 @@ export const useGitStore = create<GitState>((set, get) => ({
   logEntries: [],
   branches: [],
   stashEntries: [],
+  tagEntries: [],
   diffText: "",
   diffStagedText: "",
   selectedFile: null,
@@ -156,7 +162,16 @@ export const useGitStore = create<GitState>((set, get) => ({
       }
     };
 
-    await Promise.all([loadDiff(), loadDiffStaged(), loadLog(), loadStash()]);
+    const loadTags = async () => {
+      try {
+        const entries = await ipc.gitTagList(projectPath);
+        if (!signal.aborted) set({ tagEntries: entries });
+      } catch {
+        if (!signal.aborted) set({ tagEntries: [] });
+      }
+    };
+
+    await Promise.all([loadDiff(), loadDiffStaged(), loadLog(), loadStash(), loadTags()]);
 
     // Reload selected file diff if it still exists
     if (signal.aborted) return;
@@ -318,6 +333,56 @@ export const useGitStore = create<GitState>((set, get) => ({
       await ipc.gitStashDrop(projectPath, index);
       set({ operating: false });
       get().loadStash(projectPath);
+      return true;
+    } catch (e: unknown) {
+      set({ error: extractErrorMessage(e), operating: false });
+      return false;
+    }
+  },
+
+  loadTags: async (projectPath) => {
+    try {
+      const entries = await ipc.gitTagList(projectPath);
+      set({ tagEntries: entries });
+    } catch {
+      set({ tagEntries: [] });
+    }
+  },
+
+  createTag: async (projectPath, name, message, annotated) => {
+    if (get().operating) return false;
+    set({ operating: true, error: null });
+    try {
+      await ipc.gitCreateTag(projectPath, name, message, annotated);
+      set({ operating: false });
+      get().loadTags(projectPath);
+      return true;
+    } catch (e: unknown) {
+      set({ error: extractErrorMessage(e), operating: false });
+      return false;
+    }
+  },
+
+  deleteTag: async (projectPath, name) => {
+    if (get().operating) return false;
+    set({ operating: true, error: null });
+    try {
+      await ipc.gitDeleteTag(projectPath, name);
+      set({ operating: false });
+      get().loadTags(projectPath);
+      return true;
+    } catch (e: unknown) {
+      set({ error: extractErrorMessage(e), operating: false });
+      return false;
+    }
+  },
+
+  pushTag: async (projectPath, name) => {
+    if (get().operating) return false;
+    set({ operating: true, error: null });
+    try {
+      await ipc.gitPushTag(projectPath, name);
+      set({ operating: false });
       return true;
     } catch (e: unknown) {
       set({ error: extractErrorMessage(e), operating: false });
@@ -512,6 +577,7 @@ export const useGitStore = create<GitState>((set, get) => ({
       logEntries: [],
       branches: [],
       stashEntries: [],
+      tagEntries: [],
       diffText: "",
       diffStagedText: "",
       selectedFile: null,
