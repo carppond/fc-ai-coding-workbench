@@ -73,13 +73,50 @@ pub fn resize_terminal(
     Ok(())
 }
 
+/// 关闭终端。如果检测到 Claude CLI 正在运行，先发送 /exit 让其优雅退出。
 #[tauri::command]
-pub fn kill_terminal(state: State<TerminalState>, session_id: String) -> AppResult<()> {
+pub async fn kill_terminal(
+    state: State<'_, TerminalState>,
+    session_id: String,
+) -> AppResult<()> {
+    let mut need_wait = false;
+
+    // 检测是否有 claude 在运行，如果有则发 /exit
+    {
+        let sessions = state
+            .sessions
+            .lock()
+            .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
+        if let Some(session) = sessions.get(&session_id) {
+            if let Some(pid) = session.child_pid() {
+                // pgrep -P <pid> -f claude: 检查子进程命令行是否包含 "claude"
+                let output = std::process::Command::new("pgrep")
+                    .args(["-P", &pid.to_string(), "-f", "claude"])
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::null())
+                    .output();
+
+                if let Ok(o) = output {
+                    if !o.stdout.is_empty() {
+                        let _ = session.write("/exit\r");
+                        need_wait = true;
+                    }
+                }
+            }
+        }
+    } // 释放锁
+
+    // 等待 claude 处理 /exit 命令
+    if need_wait {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+
+    // 移除 session，触发 Drop → child.kill()
     let mut sessions = state
         .sessions
         .lock()
         .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
-    sessions.remove(&session_id); // Drop triggers child kill
+    sessions.remove(&session_id);
     Ok(())
 }
 
