@@ -83,6 +83,33 @@ pub fn kill_terminal(state: State<TerminalState>, session_id: String) -> AppResu
     Ok(())
 }
 
+/// 检查终端是否空闲（shell 无子进程）
+#[tauri::command]
+pub fn is_terminal_idle(
+    state: State<TerminalState>,
+    session_id: String,
+) -> AppResult<bool> {
+    let sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
+    let session = sessions
+        .get(&session_id)
+        .ok_or_else(|| AppError::General("session not found".into()))?;
+    let pid = session.child_pid().ok_or_else(|| AppError::General("no pid".into()))?;
+
+    // pgrep -P <pid> 查找子进程，stdout 为空则空闲
+    let output = std::process::Command::new("pgrep")
+        .args(["-P", &pid.to_string()])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output();
+    match output {
+        Ok(o) => Ok(o.stdout.is_empty()),
+        Err(_) => Ok(true), // pgrep 不可用时默认空闲
+    }
+}
+
 #[tauri::command]
 pub fn terminal_cd(
     state: State<TerminalState>,

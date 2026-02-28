@@ -1,11 +1,12 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Plus, X, RotateCw } from "lucide-react";
+import { Plus, X, RotateCw, Sparkles } from "lucide-react";
 import { useProjectStore } from "../../stores/projectStore";
 import { useFileStore } from "../../stores/fileStore";
 import { useI18n } from "../../lib/i18n";
 import { Terminal } from "./Terminal";
 import { FileViewer } from "./FileViewer";
 import { useConfirm } from "../common/ConfirmDialog";
+import * as ipc from "../../ipc/commands";
 
 interface TerminalTab {
   id: string;
@@ -89,6 +90,49 @@ export function CenterPanel() {
     });
   }, []);
 
+  // 跟踪每个 tab 对应的 terminal session ID 和聚焦函数
+  const sessionMapRef = useRef<Map<string, string>>(new Map());
+  const focusMapRef = useRef<Map<string, () => void>>(new Map());
+
+  const handleSessionReady = useCallback((tabId: string, sessionId: string | null) => {
+    if (sessionId) {
+      sessionMapRef.current.set(tabId, sessionId);
+    } else {
+      sessionMapRef.current.delete(tabId);
+    }
+  }, []);
+
+  const handleFocusReady = useCallback((tabId: string, focusFn: () => void) => {
+    focusMapRef.current.set(tabId, focusFn);
+  }, []);
+
+  // 在当前活跃终端启动 Claude Code
+  const handleLaunchClaude = useCallback(async () => {
+    if (openFilePath) closeFile();
+    const sessionId = sessionMapRef.current.get(activeTabId);
+    if (!sessionId) return;
+    const activeTerminalTab = tabs.find((t) => t.id === activeTabId);
+    if (!activeTerminalTab?.alive) return;
+
+    // 检查终端是否空闲（shell 无子进程）
+    try {
+      const idle = await ipc.isTerminalIdle(sessionId);
+      if (!idle) {
+        // 终端正在运行其他程序，仅聚焦
+        focusMapRef.current.get(activeTabId)?.();
+        return;
+      }
+    } catch {
+      // 检查失败时仍允许执行
+    }
+
+    ipc.writeTerminal(sessionId, "claude\r");
+    // 聚焦终端
+    requestAnimationFrame(() => {
+      focusMapRef.current.get(activeTabId)?.();
+    });
+  }, [activeTabId, tabs, openFilePath, closeFile]);
+
   const handleRestartTab = useCallback((tabId: string) => {
     // Restart: remove the old tab and create a new one in its place
     setTabs((prev) => {
@@ -153,6 +197,17 @@ export function CenterPanel() {
           </button>
         )}
 
+        {/* Spacer + Launch Claude Code button */}
+        <div style={{ flex: 1 }} />
+        <button
+          className="cc-launch-btn"
+          onClick={handleLaunchClaude}
+          title={t("terminal.launchCC")}
+        >
+          <Sparkles size={13} />
+          <span>{t("terminal.launchCC")}</span>
+        </button>
+
         {/* File tab (when a file is open) */}
         {openFilePath && (
           <button
@@ -201,6 +256,8 @@ export function CenterPanel() {
               key={tab.id}
               projectPath={projectPath}
               onAliveChange={(alive) => handleAliveChange(tab.id, alive)}
+              onSessionReady={(sid) => handleSessionReady(tab.id, sid)}
+              onFocusReady={(fn) => handleFocusReady(tab.id, fn)}
               visible={activeTabId === tab.id && activeTab === "terminal"}
             />
           ))}

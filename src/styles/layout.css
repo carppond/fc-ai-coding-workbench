@@ -2222,6 +2222,31 @@
   overflow-x: auto;
 }
 
+.cc-launch-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: opacity 0.15s;
+}
+
+.cc-launch-btn:hover {
+  opacity: 0.85;
+}
+
+.cc-launch-btn:active {
+  opacity: 0.7;
+}
+
 .panel-tab__label {
   white-space: nowrap;
   overflow: hidden;

@@ -47,6 +47,7 @@ const translations: Record<Locale, Record<string, string>> = {
     "terminal.exited": "终端进程已退出",
     "terminal.restart": "重启终端",
     "terminal.newTab": "新建终端",
+    "terminal.launchCC": "开启CC",
 
     // Composer
     "composer.placeholder": "输入消息...",
@@ -336,6 +337,7 @@ const translations: Record<Locale, Record<string, string>> = {
     "terminal.exited": "Terminal process exited",
     "terminal.restart": "Restart Terminal",
     "terminal.newTab": "New Terminal",
+    "terminal.launchCC": "Launch CC",
 
     // Composer
     "composer.placeholder": "Type your message...",

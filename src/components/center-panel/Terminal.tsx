@@ -393,11 +393,13 @@ const TERMINAL_THEMES: Record<Theme, ITheme> = {
 interface TerminalProps {
   projectPath: string | null;
   onAliveChange?: (alive: boolean) => void;
+  onSessionReady?: (sessionId: string | null) => void;
+  onFocusReady?: (focusFn: () => void) => void;
   /** When true, the terminal is visible and should fit to container */
   visible?: boolean;
 }
 
-export const Terminal = memo(function Terminal({ projectPath, onAliveChange, visible = true }: TerminalProps) {
+export const Terminal = memo(function Terminal({ projectPath, onAliveChange, onSessionReady, onFocusReady, visible = true }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -559,6 +561,9 @@ export const Terminal = memo(function Terminal({ projectPath, onAliveChange, vis
     fitAddonRef.current = fitAddon;
     searchAddonRef.current = searchAddon;
 
+    // 向父组件提供聚焦函数
+    onFocusReady?.(() => term.focus());
+
     const container = containerRef.current;
     const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent);
 
@@ -693,6 +698,7 @@ export const Terminal = memo(function Terminal({ projectPath, onAliveChange, vis
       sessionIdRef.current = sessionId;
       shellNameRef.current = shellName;
       onAliveChange?.(true);
+      onSessionReady?.(sessionId);
 
       // Set up per-session event listeners AFTER we have sessionId
       // When terminal is hidden, buffer output to avoid unnecessary xterm processing
@@ -806,6 +812,8 @@ export const Terminal = memo(function Terminal({ projectPath, onAliveChange, vis
       if (resizeTimer) clearTimeout(resizeTimer);
       if (unlistenOutputFn) unlistenOutputFn();
       if (unlistenExitFn) unlistenExitFn();
+      // Notify parent that session is gone
+      onSessionReady?.(null);
       // Kill the session on unmount
       if (sessionIdRef.current) {
         ipc.killTerminal(sessionIdRef.current);

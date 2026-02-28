@@ -350,6 +350,9 @@ export const killTerminal = (sessionId: string) =>
 export const terminalCd = (sessionId: string, path: string) =>
   invoke<void>("terminal_cd", { sessionId, path });
 
+export const isTerminalIdle = (sessionId: string) =>
+  invoke<boolean>("is_terminal_idle", { sessionId });
+
 export const warmupTerminal = (initialDir?: string) =>
   invoke<void>("warmup_terminal", { initialDir });
 

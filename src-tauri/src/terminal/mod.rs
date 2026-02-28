@@ -354,6 +354,11 @@ impl TerminalSession {
         })
     }
 
+    /// 获取 shell 子进程 PID
+    pub fn child_pid(&self) -> Option<u32> {
+        self.child.lock().ok()?.process_id()
+    }
+
     pub fn write(&self, data: &str) -> Result<(), String> {
         self.write_tx
             .send(data.to_string())

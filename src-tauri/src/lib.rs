@@ -127,6 +127,7 @@ pub fn run() {
             commands::terminal_commands::resize_terminal,
             commands::terminal_commands::kill_terminal,
             commands::terminal_commands::terminal_cd,
+            commands::terminal_commands::is_terminal_idle,
             commands::terminal_commands::warmup_terminal,
             commands::terminal_commands::claim_warmup_terminal,
         ])
