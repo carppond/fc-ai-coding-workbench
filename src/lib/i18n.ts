@@ -244,6 +244,8 @@ const translations: Record<Locale, Record<string, string>> = {
     "fileViewer.saved": "已保存",
     "fileViewer.unsavedChanges": "文件有未保存的更改，确定关闭？",
     "fileViewer.dontSave": "不保存",
+    "fileViewer.preview": "预览",
+    "fileViewer.edit": "编辑",
 
     // Quick Open
     "quickOpen.placeholder": "输入文件名搜索... (Cmd+P)",
@@ -534,6 +536,8 @@ const translations: Record<Locale, Record<string, string>> = {
     "fileViewer.saved": "Saved",
     "fileViewer.unsavedChanges": "File has unsaved changes. Close anyway?",
     "fileViewer.dontSave": "Don't Save",
+    "fileViewer.preview": "Preview",
+    "fileViewer.edit": "Edit",
 
     // Quick Open
     "quickOpen.placeholder": "Search file by name... (Cmd+P)",

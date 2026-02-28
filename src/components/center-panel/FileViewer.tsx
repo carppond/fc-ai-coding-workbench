@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import { X, Copy, Check, Save } from "lucide-react";
+import { X, Copy, Check, Save, Eye, Code } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import rehypeHighlight from "rehype-highlight";
+import remarkGfm from "remark-gfm";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useFileStore } from "../../stores/fileStore";
 import { useI18n } from "../../lib/i18n";
@@ -28,11 +31,11 @@ export function FileViewer() {
   const editorFontSize = useSettingsStore((s) => s.editorFontSize);
 
   const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico"]);
-  const isImage = useMemo(() => {
-    if (!openFilePath) return false;
-    const ext = openFilePath.split(".").pop()?.toLowerCase() || "";
-    return IMAGE_EXTS.has(ext);
-  }, [openFilePath]);
+  const MD_EXTS = new Set(["md", "markdown"]);
+  const fileExt = useMemo(() => openFilePath?.split(".").pop()?.toLowerCase() || "", [openFilePath]);
+  const isImage = useMemo(() => IMAGE_EXTS.has(fileExt), [fileExt]);
+  const isMd = useMemo(() => MD_EXTS.has(fileExt), [fileExt]);
+  const [previewMode, setPreviewMode] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -56,6 +59,15 @@ export function FileViewer() {
       }
     });
   }, [saveFile]);
+
+  // 文件切换时重置预览模式
+  const prevFileRef = useRef(openFilePath);
+  useEffect(() => {
+    if (openFilePath !== prevFileRef.current) {
+      setPreviewMode(false);
+      prevFileRef.current = openFilePath;
+    }
+  }, [openFilePath]);
 
   // 创建/更新编辑器
   useEffect(() => {
@@ -204,7 +216,16 @@ export function FileViewer() {
               {t("fileViewer.saved")}
             </span>
           )}
-          {!isImage && isDirty && (
+          {isMd && (
+            <button
+              className="btn btn--ghost btn--sm"
+              onClick={() => setPreviewMode((v) => !v)}
+              title={previewMode ? t("fileViewer.edit") : t("fileViewer.preview")}
+            >
+              {previewMode ? <Code size={13} /> : <Eye size={13} />}
+            </button>
+          )}
+          {!isImage && !previewMode && isDirty && (
             <button
               className="btn btn--ghost btn--sm"
               onClick={handleSave}
@@ -239,7 +260,23 @@ export function FileViewer() {
           />
         </div>
       ) : (
-        <div className="file-viewer__editor" ref={containerRef} />
+        <>
+          {isMd && previewMode && (
+            <div className="md-preview">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeHighlight]}
+              >
+                {(viewRef.current?.state.doc.toString() ?? openFileContent) || ""}
+              </ReactMarkdown>
+            </div>
+          )}
+          <div
+            className="file-viewer__editor"
+            ref={containerRef}
+            style={{ display: isMd && previewMode ? "none" : undefined }}
+          />
+        </>
       )}
     </div>
   );
