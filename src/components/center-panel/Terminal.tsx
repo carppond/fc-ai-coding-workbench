@@ -736,11 +736,17 @@ export const Terminal = memo(function Terminal({ projectPath, onAliveChange, vis
         .then((result) => {
           if (disposed) return;
           if (result) {
-            // Got a pre-warmed session — set up listener first
+            // Got a pre-warmed session — set up listener first, then cd
             setupSession(result[0], result[1]);
-            // warmup 终端已在正确目录启动，发送 Ctrl+L 清屏并重绘 prompt
-            // 不发送 cd 命令，避免命令回显闪烁
-            ipc.writeTerminal(result[0], "\x0c").catch(() => {});
+            if (path) {
+              // 隐藏终端，避免 cd+clear 命令回显闪烁
+              const el = containerRef.current;
+              if (el) el.style.visibility = "hidden";
+              ipc.terminalCd(result[0], path).finally(() => {
+                // cd 已写入 PTY，等待 shell 处理完成后再显示
+                setTimeout(() => { if (el) el.style.visibility = ""; }, 150);
+              });
+            }
           } else {
             // No warmup available — normal spawn
             return ipc.spawnTerminal(path ?? undefined, term.rows, term.cols)
