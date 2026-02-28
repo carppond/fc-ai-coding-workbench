@@ -59,7 +59,7 @@ export function FileViewer() {
 
   // 创建/更新编辑器
   useEffect(() => {
-    if (!containerRef.current || !openFilePath || openFileContent === "") return;
+    if (!containerRef.current || !openFilePath || openFileContent === null) return;
 
     // 如果编辑器已存在且是同一个文件，跳过重建
     if (viewRef.current && editorFileRef.current === openFilePath) return;
@@ -70,7 +70,7 @@ export function FileViewer() {
       viewRef.current = null;
     }
     editorFileRef.current = openFilePath;
-    originalContentRef.current = openFileContent;
+    originalContentRef.current = openFileContent ?? "";
 
     // 异步加载语言扩展
     const setup = async () => {
@@ -130,7 +130,7 @@ export function FileViewer() {
       );
 
       const state = EditorState.create({
-        doc: openFileContent,
+        doc: openFileContent ?? "",
         extensions,
       });
 

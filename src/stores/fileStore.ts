@@ -11,7 +11,7 @@ interface FileState {
 
   // File viewer/editor state
   openFilePath: string | null;
-  openFileContent: string;
+  openFileContent: string | null;
   openFileLine: number | null; // line to scroll to after opening
   isDirty: boolean;
   saving: boolean;
@@ -51,7 +51,7 @@ export const useFileStore = create<FileState>((set, get) => ({
   loading: false,
   currentProjectPath: null,
   openFilePath: null,
-  openFileContent: "",
+  openFileContent: null,
   openFileLine: null,
   isDirty: false,
   saving: false,
@@ -141,21 +141,19 @@ export const useFileStore = create<FileState>((set, get) => ({
   },
 
   openFile: async (filePath: string, line?: number) => {
-    set({ openFilePath: filePath, openFileContent: "", openFileLine: line ?? null, isDirty: false });
+    set({ openFilePath: filePath, openFileContent: null, openFileLine: line ?? null, isDirty: false });
     try {
       const content = await ipc.readFileContent(filePath);
       if (get().openFilePath === filePath) {
         set({ openFileContent: content });
       }
     } catch {
-      if (get().openFilePath === filePath) {
-        set({ openFileContent: "" });
-      }
+      // 加载失败保持 null
     }
   },
 
   closeFile: () => {
-    set({ openFilePath: null, openFileContent: "", openFileLine: null, isDirty: false });
+    set({ openFilePath: null, openFileContent: null, openFileLine: null, isDirty: false });
   },
 
   markDirty: (dirty: boolean) => {
@@ -200,7 +198,7 @@ export const useFileStore = create<FileState>((set, get) => ({
       loading: false,
       currentProjectPath: null,
       openFilePath: null,
-      openFileContent: "",
+      openFileContent: null,
       openFileLine: null,
       isDirty: false,
       saving: false,

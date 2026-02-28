@@ -197,17 +197,6 @@ export function CenterPanel() {
           </button>
         )}
 
-        {/* Spacer + Launch Claude Code button */}
-        <div style={{ flex: 1 }} />
-        <button
-          className="cc-launch-btn"
-          onClick={handleLaunchClaude}
-          title={t("terminal.launchCC")}
-        >
-          <Sparkles size={13} />
-          <span>{t("terminal.launchCC")}</span>
-        </button>
-
         {/* File tab (when a file is open) */}
         {openFilePath && (
           <button
@@ -238,6 +227,17 @@ export function CenterPanel() {
             </span>
           </button>
         )}
+
+        {/* Spacer + Launch Claude Code button */}
+        <div style={{ flex: 1 }} />
+        <button
+          className="cc-launch-btn"
+          onClick={handleLaunchClaude}
+          title={t("terminal.launchCC")}
+        >
+          <Sparkles size={13} />
+          <span>{t("terminal.launchCC")}</span>
+        </button>
       </div>
 
       {/* Content area */}
