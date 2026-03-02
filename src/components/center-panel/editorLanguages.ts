@@ -145,13 +145,14 @@ export async function getLanguageExtension(filePath: string): Promise<Extension 
       return php();
     }
 
-    // Shell
+    // Shell（通过 legacy-modes 加载）
     case "sh":
     case "bash":
     case "zsh":
     case "fish": {
-      // Shell 暂无官方包，不加载语言扩展
-      return null;
+      const { StreamLanguage } = await import("@codemirror/language");
+      const { shell } = await import("@codemirror/legacy-modes/mode/shell");
+      return StreamLanguage.define(shell);
     }
 
     // TOML
