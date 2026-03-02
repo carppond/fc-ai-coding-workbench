@@ -48,6 +48,14 @@ const translations: Record<Locale, Record<string, string>> = {
     "terminal.restart": "重启终端",
     "terminal.newTab": "新建终端",
     "terminal.launchCC": "开启CC",
+    "terminal.rename": "重命名",
+    "terminal.splitRight": "向右拆分",
+    "terminal.splitDown": "向下拆分",
+    "terminal.closePane": "关闭",
+    "terminal.chooseDir": "选择目录新建...",
+    "terminal.newTerminal": "新建终端",
+    "terminal.tooltipNew": "新建终端 (右键选择目录)",
+    "terminal.tooltipRename": "双击重命名",
 
     // Composer
     "composer.placeholder": "输入消息...",
@@ -354,6 +362,14 @@ const translations: Record<Locale, Record<string, string>> = {
     "terminal.restart": "Restart Terminal",
     "terminal.newTab": "New Terminal",
     "terminal.launchCC": "Launch CC",
+    "terminal.rename": "Rename",
+    "terminal.splitRight": "Split Right",
+    "terminal.splitDown": "Split Down",
+    "terminal.closePane": "Close",
+    "terminal.chooseDir": "New Terminal in Directory...",
+    "terminal.newTerminal": "New Terminal",
+    "terminal.tooltipNew": "New Terminal (right-click for directory)",
+    "terminal.tooltipRename": "Double-click to rename",
 
     // Composer
     "composer.placeholder": "Type your message...",

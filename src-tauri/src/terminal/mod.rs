@@ -441,6 +441,8 @@ unset STARSHIP_SHELL STARSHIP_SESSION_KEY 2>/dev/null
 export VIRTUAL_ENV_DISABLE_PROMPT=1
 export CONDA_CHANGEPS1=false
 typeset -g POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD=true 2>/dev/null
+# 彻底禁用 zsh 的部分行标记（避免新终端/分屏时出现 % 和空行）
+unsetopt PROMPT_CR PROMPT_SP
 
 __shiguang_prompt() {{
   PROMPT='%F{{110}}%1~%f $ '

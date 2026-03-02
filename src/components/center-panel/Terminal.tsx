@@ -392,6 +392,8 @@ const TERMINAL_THEMES: Record<Theme, ITheme> = {
 
 interface TerminalProps {
   projectPath: string | null;
+  /** 覆盖初始工作目录，undefined 时用 projectPath */
+  cwd?: string;
   onAliveChange?: (alive: boolean) => void;
   onSessionReady?: (sessionId: string | null) => void;
   onFocusReady?: (focusFn: () => void) => void;
@@ -399,7 +401,7 @@ interface TerminalProps {
   visible?: boolean;
 }
 
-export const Terminal = memo(function Terminal({ projectPath, onAliveChange, onSessionReady, onFocusReady, visible = true }: TerminalProps) {
+export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange, onSessionReady, onFocusReady, visible = true }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -409,6 +411,9 @@ export const Terminal = memo(function Terminal({ projectPath, onAliveChange, onS
   // Track latest projectPath via ref so the spawn timer can read it
   const projectPathRef = useRef(projectPath);
   projectPathRef.current = projectPath;
+  // cwd 覆盖 projectPath（用于自选目录终端）
+  const cwdRef = useRef(cwd);
+  cwdRef.current = cwd;
   // Track visibility via ref for output buffering (avoids xterm processing when hidden)
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
@@ -735,7 +740,8 @@ export const Terminal = memo(function Terminal({ projectPath, onAliveChange, onS
     let rafId = requestAnimationFrame(() => {
       if (disposed) return;
       safeFit();
-      const path = projectPathRef.current;
+      // cwd 优先于 projectPath（自选目录终端）
+      const path = cwdRef.current ?? projectPathRef.current;
 
       // Try to claim a pre-warmed terminal first, fallback to normal spawn
       ipc.claimWarmupTerminal(path ?? undefined, term.rows, term.cols)
