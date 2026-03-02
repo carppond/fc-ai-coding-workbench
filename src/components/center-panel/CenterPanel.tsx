@@ -221,6 +221,34 @@ export function CenterPanel() {
     }));
   }, []);
 
+  /* ── Cmd+W / Ctrl+W 关闭当前面板 ── */
+  useEffect(() => {
+    const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent);
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "w" && (isMac ? e.metaKey : e.ctrlKey)) {
+        e.preventDefault();
+        if (activeTab === "file") {
+          if (isDirty) {
+            confirm({
+              message: t("fileViewer.unsavedChanges"),
+              confirmLabel: t("fileViewer.dontSave"),
+              cancelLabel: t("confirm.cancel"),
+            }).then((result) => { if (result) closeFile(); });
+          } else {
+            closeFile();
+          }
+        } else {
+          const curTab = tabs.find((tab) => tab.id === activeTabId);
+          if (!curTab) return;
+          const paneId = activePaneIdRef.current.get(activeTabId) || curTab.panes[0]?.id;
+          if (paneId) handleClosePane(activeTabId, paneId);
+        }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [activeTab, activeTabId, tabs, isDirty, closeFile, confirm, t, handleClosePane]);
+
   /* ── Pane 焦点 ── */
   const handlePaneFocus = useCallback((tabId: string, paneId: string) => {
     activePaneIdRef.current.set(tabId, paneId);

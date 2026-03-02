@@ -314,6 +314,7 @@ const translations: Record<Locale, Record<string, string>> = {
     "shortcuts.termNewline": "输入换行",
     "shortcuts.chatSend": "发送消息",
     "shortcuts.chatNewline": "输入换行",
+    "shortcuts.closePane": "关闭当前面板",
     "shortcuts.gitCommit": "提交",
 
     // Guide
@@ -628,6 +629,7 @@ const translations: Record<Locale, Record<string, string>> = {
     "shortcuts.termNewline": "Newline",
     "shortcuts.chatSend": "Send Message",
     "shortcuts.chatNewline": "Newline",
+    "shortcuts.closePane": "Close Current Panel",
     "shortcuts.gitCommit": "Commit",
 
     // Guide

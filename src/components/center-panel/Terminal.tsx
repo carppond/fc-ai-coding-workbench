@@ -608,6 +608,11 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
         return false;
       }
 
+      // Cmd+W (Mac) / Ctrl+W (Win/Linux) → 关闭当前面板（由 CenterPanel 全局处理）
+      if (e.key === "w" && (isMac ? e.metaKey : e.ctrlKey)) {
+        return false;
+      }
+
       // Cmd/Ctrl+V → paste from clipboard
       if (e.key === "v" && (isMac ? e.metaKey : e.ctrlKey)) {
         return false; // Let browser paste event handle it

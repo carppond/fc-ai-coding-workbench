@@ -212,6 +212,7 @@ function ShortcutsReference() {
         { keys: `${mod} + N`, desc: t("shortcuts.newSession") },
         { keys: `${mod} + Enter`, desc: t("shortcuts.send") },
         { keys: `${mod} + K`, desc: t("shortcuts.focusSearch") },
+        { keys: `${mod} + W`, desc: t("shortcuts.closePane") },
         { keys: "Escape", desc: t("shortcuts.close") },
       ],
     },
