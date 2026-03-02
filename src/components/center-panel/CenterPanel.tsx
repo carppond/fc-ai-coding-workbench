@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useLayoutEffect } from "react";
 import { Plus, X, RotateCw, Sparkles } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useProjectStore } from "../../stores/projectStore";
@@ -84,6 +84,9 @@ export function CenterPanel() {
   const activeTab = openFilePath ? "file" : "terminal";
   const projectPath = activeProject?.path ?? null;
   const projectId = activeProject?.id ?? null;
+
+  // Tab 容器 ref（用于关闭 pane 后重置拖拽设置的内联 flex）
+  const tabContainerRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   /* ── pane 级别的 session/focus 映射（key = paneId）── */
   const sessionMapRef = useRef<Map<string, string>>(new Map());
@@ -206,6 +209,22 @@ export function CenterPanel() {
       });
     });
   }, []);
+
+  /* ── 关闭 pane 后重置拖拽残留的内联 flex ── */
+  useLayoutEffect(() => {
+    for (const tab of tabs) {
+      if (tab.panes.length <= 1) {
+        const container = tabContainerRefs.current.get(tab.id);
+        if (!container) continue;
+        const paneEls = Array.from(container.children).filter(
+          (c) => !(c as HTMLElement).classList.contains("pane-resize-handle")
+        ) as HTMLElement[];
+        for (const el of paneEls) {
+          el.style.flex = "1";
+        }
+      }
+    }
+  }, [tabs]);
 
   /* ── 分屏 ── */
   const handleSplitPane = useCallback((tabId: string, direction: "horizontal" | "vertical") => {
@@ -506,6 +525,10 @@ export function CenterPanel() {
             return (
               <div
                 key={tab.id}
+                ref={(el) => {
+                  if (el) tabContainerRefs.current.set(tab.id, el);
+                  else tabContainerRefs.current.delete(tab.id);
+                }}
                 style={{
                   width: "100%", height: "100%",
                   display: isActive ? "flex" : "none",

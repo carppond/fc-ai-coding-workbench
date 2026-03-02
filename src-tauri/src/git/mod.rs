@@ -135,14 +135,20 @@ pub fn diff_workdir_file(project_path: &str, file_path: Option<&str>) -> AppResu
     let diff = repo.diff_index_to_workdir(None, Some(&mut opts))?;
     let mut buf = Vec::new();
     let mut truncated = false;
-    diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
+    let print_result = diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
         if is_full_diff && buf.len() >= MAX_DIFF_BYTES {
             truncated = true;
             return false;
         }
         buf.extend_from_slice(line.content());
         true
-    })?;
+    });
+    // 回调返回 false 时 libgit2 报 GIT_EUSER(-7)，属于正常截断，忽略此错误
+    if let Err(e) = print_result {
+        if !truncated {
+            return Err(e.into());
+        }
+    }
     let mut result = String::from_utf8_lossy(&buf).to_string();
     if truncated {
         result.push_str("\n\n... (diff truncated) ...\n");
@@ -168,14 +174,20 @@ pub fn diff_staged_file(project_path: &str, file_path: Option<&str>) -> AppResul
     let diff = repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut opts))?;
     let mut buf = Vec::new();
     let mut truncated = false;
-    diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
+    let print_result = diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
         if is_full_diff && buf.len() >= MAX_DIFF_BYTES {
             truncated = true;
             return false;
         }
         buf.extend_from_slice(line.content());
         true
-    })?;
+    });
+    // 回调返回 false 时 libgit2 报 GIT_EUSER(-7)，属于正常截断，忽略此错误
+    if let Err(e) = print_result {
+        if !truncated {
+            return Err(e.into());
+        }
+    }
     let mut result = String::from_utf8_lossy(&buf).to_string();
     if truncated {
         result.push_str("\n\n... (diff truncated) ...\n");
