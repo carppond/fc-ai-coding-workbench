@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, memo } from "react";
 import { ChevronRight, ChevronDown, Folder, FileText, Loader, FileCode, FileJson, Image, Terminal, Database, Lock, Package, Settings, BookOpen } from "lucide-react";
-import type { DirEntry } from "../../lib/types";
+import type { DirEntry, GitFileStatus } from "../../lib/types";
 import { useFileStore } from "../../stores/fileStore";
 import { useI18n } from "../../lib/i18n";
 import { useConfirm } from "../common/ConfirmDialog";
@@ -10,6 +10,8 @@ interface FileTreeItemProps {
   entry: DirEntry;
   depth: number;
   defaultExpanded?: boolean;
+  gitStatusMap?: Map<string, GitFileStatus>;
+  gitDirtyDirs?: Set<string>;
 }
 
 interface ContextMenuState {
@@ -71,7 +73,29 @@ function getFileIcon(name: string): { icon: React.ReactNode; color: string } {
   }
 }
 
-export const FileTreeItem = memo(function FileTreeItem({ entry, depth, defaultExpanded }: FileTreeItemProps) {
+/** 状态字母映射 */
+function statusLetter(status: string): string {
+  switch (status) {
+    case "added": return "A";
+    case "modified": return "M";
+    case "deleted": return "D";
+    case "untracked": return "?";
+    case "renamed": return "R";
+    default: return "?";
+  }
+}
+
+/** 状态对应的 CSS 修饰符 */
+function statusClass(status: string): string {
+  switch (status) {
+    case "modified": case "renamed": return "modified";
+    case "added": case "untracked": return "added";
+    case "deleted": return "deleted";
+    default: return "modified";
+  }
+}
+
+export const FileTreeItem = memo(function FileTreeItem({ entry, depth, defaultExpanded, gitStatusMap, gitDirtyDirs }: FileTreeItemProps) {
   const expandedPaths = useFileStore((s) => s.expandedPaths);
   const toggleExpand = useFileStore((s) => s.toggleExpand);
   const loadingPaths = useFileStore((s) => s.loadingPaths);
@@ -256,9 +280,25 @@ export const FileTreeItem = memo(function FileTreeItem({ entry, depth, defaultEx
             onKeyDown={handleEditKeyDown}
             onClick={(e) => e.stopPropagation()}
           />
-        ) : (
-          <span className="file-tree-item__name">{entry.name}</span>
-        )}
+        ) : (() => {
+          const fileStatus = gitStatusMap?.get(entry.path);
+          const hasDirtyChildren = isDir && gitDirtyDirs?.has(entry.path);
+          const nameClass = fileStatus
+            ? `file-tree-item__name file-tree-item__name--${statusClass(fileStatus.status)}`
+            : hasDirtyChildren
+              ? "file-tree-item__name file-tree-item__name--has-changes"
+              : "file-tree-item__name";
+          return (
+            <>
+              <span className={nameClass}>{entry.name}</span>
+              {fileStatus && (
+                <span className={`file-tree-item__git-status file-tree-item__name--${statusClass(fileStatus.status)}`}>
+                  {statusLetter(fileStatus.status)}
+                </span>
+              )}
+            </>
+          );
+        })()}
       </div>
 
       {/* Inline new file/folder input */}
@@ -284,7 +324,7 @@ export const FileTreeItem = memo(function FileTreeItem({ entry, depth, defaultEx
       )}
 
       {isDir && isExpanded && entry.children && entry.children.map((child) => (
-        <FileTreeItem key={child.path} entry={child} depth={depth + 1} />
+        <FileTreeItem key={child.path} entry={child} depth={depth + 1} gitStatusMap={gitStatusMap} gitDirtyDirs={gitDirtyDirs} />
       ))}
 
       {/* Context Menu */}

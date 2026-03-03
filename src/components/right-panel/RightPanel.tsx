@@ -125,7 +125,7 @@ function GitInitForm() {
   );
 }
 
-const POLL_INTERVAL = 10000;
+const POLL_INTERVAL = 5000;
 const MAX_BACKOFF = 30000;
 
 export function RightPanel() {

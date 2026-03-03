@@ -2,13 +2,16 @@ import { useEffect, useMemo } from "react";
 import { FolderOpen, Loader } from "lucide-react";
 import { useFileStore } from "../../stores/fileStore";
 import { useProjectStore } from "../../stores/projectStore";
+import { useGitStore } from "../../stores/gitStore";
 import { useI18n } from "../../lib/i18n";
 import { FileTreeItem } from "./FileTreeItem";
 import type { DirEntry } from "../../lib/types";
+import type { GitFileStatus } from "../../lib/types";
 
 export function FileTree() {
   const { activeProject } = useProjectStore();
   const { tree, loading, loadTree, reset } = useFileStore();
+  const fileStatuses = useGitStore((s) => s.fileStatuses);
   const { t } = useI18n();
 
   useEffect(() => {
@@ -18,6 +21,33 @@ export function FileTree() {
       reset();
     }
   }, [activeProject?.id]);
+
+  // 构建 git 状态查找 Map（绝对路径 → GitFileStatus）和脏目录 Set
+  const { gitStatusMap, gitDirtyDirs } = useMemo(() => {
+    const map = new Map<string, GitFileStatus>();
+    const dirs = new Set<string>();
+    if (!activeProject) return { gitStatusMap: map, gitDirtyDirs: dirs };
+
+    const projectPath = activeProject.path;
+    for (const status of fileStatuses) {
+      const absPath = projectPath + "/" + status.path;
+      map.set(absPath, status);
+      // 向上递推所有父目录
+      let parent = absPath;
+      while (true) {
+        const idx = parent.lastIndexOf("/");
+        if (idx <= 0) break;
+        parent = parent.substring(0, idx);
+        if (parent.length <= projectPath.length) {
+          // 项目根目录也加入
+          dirs.add(parent);
+          break;
+        }
+        dirs.add(parent);
+      }
+    }
+    return { gitStatusMap: map, gitDirtyDirs: dirs };
+  }, [activeProject, fileStatuses]);
 
   // Wrap tree data in a root node representing the project directory
   const rootEntry = useMemo<DirEntry | null>(() => {
@@ -54,7 +84,13 @@ export function FileTree() {
   return (
     <div className="file-tree">
       <div className="file-tree__list">
-        <FileTreeItem entry={rootEntry} depth={0} defaultExpanded />
+        <FileTreeItem
+          entry={rootEntry}
+          depth={0}
+          defaultExpanded
+          gitStatusMap={gitStatusMap}
+          gitDirtyDirs={gitDirtyDirs}
+        />
       </div>
     </div>
   );
