@@ -326,14 +326,17 @@ const translations: Record<Locale, Record<string, string>> = {
     // Claude Code 扩展命令
     "command.title": "Claude Code 扩展命令",
     "command.optimizePromptDesc": "分析并优化你的 Prompt，提升 AI 理解和输出质量",
+    "command.codeReviewDesc": "审查代码的缺陷、性能、安全和最佳实践",
+    "command.debugDesc": "分析错误信息，定位根因并提供修复方案",
+    "command.genTestsDesc": "为指定文件或函数生成单元测试",
     "command.install": "安装",
     "command.update": "更新",
     "command.uninstall": "卸载",
     "command.installed": "已安装",
     "command.notInstalled": "未安装",
-    "command.installSuccess": "安装成功！在 Claude CLI 中输入 /optimize-prompt 使用",
+    "command.installSuccess": "安装成功！在 Claude CLI 中输入 /命令名 使用",
     "command.uninstallSuccess": "已卸载",
-    "command.hint": "安装后在 Claude CLI 输入 /optimize-prompt [你的prompt] 即可使用",
+    "command.hint": "安装后在 Claude CLI 输入 /命令名 [参数] 即可使用",
 
     // Language toggle
     "locale.toggle": "中/EN",
@@ -653,14 +656,17 @@ const translations: Record<Locale, Record<string, string>> = {
     // Claude Code Extensions
     "command.title": "Claude Code Extensions",
     "command.optimizePromptDesc": "Optimize prompts for better AI comprehension and output quality",
+    "command.codeReviewDesc": "Review code for bugs, performance, security and best practices",
+    "command.debugDesc": "Analyze error messages and locate root cause",
+    "command.genTestsDesc": "Generate unit tests for the specified file or function",
     "command.install": "Install",
     "command.update": "Update",
     "command.uninstall": "Uninstall",
     "command.installed": "Installed",
     "command.notInstalled": "Not Installed",
-    "command.installSuccess": "Installed! Use /optimize-prompt in Claude CLI",
+    "command.installSuccess": "Installed! Use /command-name in Claude CLI",
     "command.uninstallSuccess": "Uninstalled",
-    "command.hint": "Use /optimize-prompt [your-prompt] in Claude CLI after install",
+    "command.hint": "Use /command-name [args] in Claude CLI after install",
 
     // Language toggle
     "locale.toggle": "EN/中",
