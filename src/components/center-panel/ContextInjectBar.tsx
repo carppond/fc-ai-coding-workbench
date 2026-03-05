@@ -11,7 +11,8 @@ interface ContextInjectBarProps {
 
 export function ContextInjectBar({ onInject }: ContextInjectBarProps) {
   const { activeProject } = useProjectStore();
-  const { loadDiff, loadDiffStaged } = useGitStore();
+  const loadDiff = useGitStore((s) => s.loadDiff);
+  const loadDiffStaged = useGitStore((s) => s.loadDiffStaged);
   const { t } = useI18n();
 
   const handleInsertDiff = async () => {

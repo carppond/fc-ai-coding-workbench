@@ -11,7 +11,8 @@ export function LeftPanel() {
   const [activeTab, setActiveTab] = useState<"files" | "search">("files");
   const { projects, activeProject, setActiveProject, openProject, renameProject, deleteProject } =
     useProjectStore();
-  const { loadTree, refreshExpanded } = useFileStore();
+  const loadTree = useFileStore((s) => s.loadTree);
+  const refreshExpanded = useFileStore((s) => s.refreshExpanded);
   const { t } = useI18n();
   const { confirm } = useConfirm();
   const lastRefreshRef = useRef(0);

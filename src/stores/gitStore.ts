@@ -207,7 +207,18 @@ export const useGitStore = create<GitState>((set, get) => ({
       if (isGitRepo) branch = get().branchInfo;
     }
 
-    set({ fileStatuses: statuses, branchInfo: branch, isGitRepo });
+    // 浅比较：数据未变则跳过 set()，避免触发无意义的重渲染
+    const prev = get();
+    const statusChanged = !_shallowEqualStatuses(prev.fileStatuses, statuses);
+    const branchChanged = !_shallowEqualBranch(prev.branchInfo, branch);
+    const repoChanged = prev.isGitRepo !== isGitRepo;
+    if (statusChanged || branchChanged || repoChanged) {
+      const update: Partial<GitState> = {};
+      if (statusChanged) update.fileStatuses = statuses;
+      if (branchChanged) update.branchInfo = branch;
+      if (repoChanged) update.isGitRepo = isGitRepo;
+      set(update);
+    }
   },
 
   loadLog: async (projectPath) => {
@@ -591,6 +602,22 @@ export const useGitStore = create<GitState>((set, get) => ({
     });
   },
 }));
+
+/** 浅比较 fileStatuses 数组：长度 + 每项 path/status/staged */
+function _shallowEqualStatuses(a: GitFileStatus[], b: GitFileStatus[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].path !== b[i].path || a[i].status !== b[i].status || a[i].staged !== b[i].staged) return false;
+  }
+  return true;
+}
+
+/** 浅比较 branchInfo */
+function _shallowEqualBranch(a: GitBranchInfo | null, b: GitBranchInfo | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.name === b.name && a.remote === b.remote && a.ahead === b.ahead && a.behind === b.behind && a.is_detached === b.is_detached;
+}
 
 /** Targeted refresh after stage/unstage/discard: only reload status + diffs (skip log & branchInfo) */
 async function _refreshAfterFileOp(
