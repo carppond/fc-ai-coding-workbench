@@ -5,6 +5,7 @@ import { useSettingsStore } from "../../stores/settingsStore";
 import { useI18n } from "../../lib/i18n";
 import { EnvironmentSetup } from "../common/EnvironmentSetup";
 import { GuideModal } from "../common/GuideModal";
+import { ClaudeCommandInstaller } from "../common/ClaudeCommandInstaller";
 import * as ipc from "../../ipc/commands";
 
 function ProxySettings() {
@@ -320,6 +321,8 @@ export function TopBar() {
         >
           <BookOpen size={16} color="var(--text-secondary)" />
         </button>
+
+        <ClaudeCommandInstaller />
 
         <button
           className="top-bar__btn"
