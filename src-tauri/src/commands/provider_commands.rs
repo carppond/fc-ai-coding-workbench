@@ -172,9 +172,13 @@ pub async fn generate_commit_message(
     for (k, v) in crate::proxy::env_pairs() {
         cmd.env(k, v);
     }
-    let output = cmd.output()
-        .await
-        .map_err(|e| AppError::Provider(format!("Failed to run claude CLI: {}", e)))?;
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        cmd.output(),
+    )
+    .await
+    .map_err(|_| AppError::Provider("claude CLI timed out (60s)".to_string()))?
+    .map_err(|e| AppError::Provider(format!("Failed to run claude CLI: {}", e)))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
