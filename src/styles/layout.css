@@ -2690,6 +2690,18 @@
   border-bottom: 1px solid var(--border);
 }
 
+.file-viewer__error {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  text-align: center;
+  line-height: 1.6;
+}
+
 .file-viewer__image-container {
   flex: 1;
   min-height: 0;

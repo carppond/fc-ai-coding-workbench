@@ -13,6 +13,7 @@ interface FileState {
   openFilePath: string | null;
   openFileContent: string | null;
   openFileLine: number | null; // line to scroll to after opening
+  openFileError: string | null; // 文件加载失败的错误信息
   isDirty: boolean;
   saving: boolean;
 
@@ -53,6 +54,7 @@ export const useFileStore = create<FileState>((set, get) => ({
   openFilePath: null,
   openFileContent: null,
   openFileLine: null,
+  openFileError: null,
   isDirty: false,
   saving: false,
 
@@ -141,19 +143,22 @@ export const useFileStore = create<FileState>((set, get) => ({
   },
 
   openFile: async (filePath: string, line?: number) => {
-    set({ openFilePath: filePath, openFileContent: null, openFileLine: line ?? null, isDirty: false });
+    set({ openFilePath: filePath, openFileContent: null, openFileLine: line ?? null, openFileError: null, isDirty: false });
     try {
       const content = await ipc.readFileContent(filePath);
       if (get().openFilePath === filePath) {
         set({ openFileContent: content });
       }
-    } catch {
-      // 加载失败保持 null
+    } catch (err) {
+      if (get().openFilePath === filePath) {
+        const msg = err instanceof Error ? err.message : typeof err === "string" ? err : JSON.stringify(err);
+        set({ openFileError: msg });
+      }
     }
   },
 
   closeFile: () => {
-    set({ openFilePath: null, openFileContent: null, openFileLine: null, isDirty: false });
+    set({ openFilePath: null, openFileContent: null, openFileLine: null, openFileError: null, isDirty: false });
   },
 
   markDirty: (dirty: boolean) => {
@@ -200,6 +205,7 @@ export const useFileStore = create<FileState>((set, get) => ({
       openFilePath: null,
       openFileContent: null,
       openFileLine: null,
+      openFileError: null,
       isDirty: false,
       saving: false,
     });

@@ -21,6 +21,7 @@ import { useSettingsStore } from "../../stores/settingsStore";
 export function FileViewer() {
   const openFilePath = useFileStore((s) => s.openFilePath);
   const openFileContent = useFileStore((s) => s.openFileContent);
+  const openFileError = useFileStore((s) => s.openFileError);
   const openFileLine = useFileStore((s) => s.openFileLine);
   const isDirty = useFileStore((s) => s.isDirty);
   const saving = useFileStore((s) => s.saving);
@@ -251,7 +252,11 @@ export function FileViewer() {
           </button>
         </div>
       </div>
-      {isImage ? (
+      {openFileError ? (
+        <div className="file-viewer__error">
+          <span>{openFileError}</span>
+        </div>
+      ) : isImage ? (
         <div className="file-viewer__image-container">
           <img
             src={convertFileSrc(openFilePath)}

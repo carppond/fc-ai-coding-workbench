@@ -336,6 +336,134 @@ For each function/method, generate tests covering:
 - If the function has side effects, verify the side effects
 `;
 
+// gen-docs.md 文件内容
+const GEN_DOCS_CONTENT = `---
+description: Generate user-oriented documentation for files, modules or projects
+argument-hint: [file-path or directory-path]
+allowed-tools: Read, Grep, Glob
+---
+
+Generate user-oriented documentation for the specified target.
+
+## Input
+
+Documentation target: $ARGUMENTS
+
+## Step 1: Language Selection
+
+Ask the user:
+
+"请选择文档语言 / Select document language:
+1. 中文（默认）
+2. English"
+
+If the user does not respond or says "1" or "中文", use Chinese with English technical terms retained.
+If the user says "2" or "English", use English.
+
+## Step 2: Read and Analyze
+
+1. If the input is a file path, read the file to understand all exports, functions, classes, and usage patterns
+2. If the input is a directory path, use Glob to find source files, then read key files to understand the module structure
+3. If no input provided, read the project root to understand the overall architecture (package.json, main entry, directory structure)
+
+Focus on understanding:
+- What does this code DO (from a user's perspective)?
+- What are the main commands/functions/APIs a user would interact with?
+- How do different parts connect to each other (data flow)?
+- What are the typical use cases?
+
+## Step 3: Generate Outline
+
+Present a documentation outline for user approval before writing the full content.
+
+Format:
+### 文档大纲 / Document Outline
+
+1. **概述** — One sentence: what this is and who it's for
+2. **快速开始** — Minimal steps to get running
+3. **核心功能** — List each command/function/API with:
+   - section name
+   - one-line description
+4. **工作流** — List planned workflow sections
+5. **附录** — FAQ, glossary, etc. (if needed)
+
+Then ask: "大纲是否需要调整？确认后开始生成完整文档。"
+
+## Step 4: Generate Full Documentation
+
+After user confirms the outline, generate the complete documentation following these principles:
+
+### Principle 1: User Mental Model
+
+For each command/function/API, answer these 5 questions in order:
+
+| Question | What it solves |
+|----------|---------------|
+| **When to use** (什么时候用) | "Should I use this?" — describe the user's goal, not the feature |
+| **How to use** (怎么用) | Parameters, flags, syntax |
+| **Where input comes from** (输入从哪来) | How to obtain the parameter values |
+| **How to read output** (怎么看输出) | What each part of the output means |
+| **What's next** (下一步) | What to do after seeing the result |
+
+### Principle 2: Scenario-Driven Index
+
+Add a "Typical Scenario" column to the command/API index table:
+
+| Command/API | Description | Typical Scenario |
+|-------------|-------------|------------------|
+| name | what it does | when a user would reach for it |
+
+### Principle 3: Data Flow Between Commands
+
+Show how commands/functions connect. Use arrow notation:
+
+\`commandA output → commandB input → commandC input\`
+
+In each command section, add "Where does the input come from?" listing concrete sources.
+
+### Principle 4: Annotated Examples
+
+For every example, add inline annotations on key lines:
+
+\`\`\`
+output line 1              ← what this means
+output line 2              ← why this matters
+\`\`\`
+
+### Principle 5: Task-Oriented Workflows
+
+At the end, organize commands into workflows by user goal:
+
+### Workflow: [User Goal]
+1. step one → what to look at
+2. step two → what to do with the result
+3. step three → conclusion
+
+### Principle 6: Compare Similar Features
+
+If multiple commands/functions do similar things, add a comparison:
+
+| Feature | A | B | C |
+|---------|---|---|---|
+| Use when | ... | ... | ... |
+| Output | ... | ... | ... |
+| Best for | ... | ... | ... |
+
+## Output Format
+
+Output the complete documentation in Markdown format, ready to save as a .md file.
+
+## Guidelines
+
+- Write for the USER, not the developer — assume the reader wants to USE the tool, not modify it
+- Lead with "when to use" not "what it does" — users come with goals, not feature names
+- Every example must be runnable or copy-pastable
+- Do not document internal implementation details unless they affect usage
+- If a function is simple and self-explanatory, keep its docs short — do not pad
+- Use consistent terminology throughout the document
+- If the codebase has existing docs, respect their style and fill gaps rather than rewrite
+`;
+
 interface CommandInfo {
   id: string;
   filename: string;
@@ -350,6 +478,7 @@ export function ClaudeCommandInstaller() {
     { id: "code-review", filename: "code-review.md", installed: false },
     { id: "debug", filename: "debug.md", installed: false },
     { id: "gen-tests", filename: "gen-tests.md", installed: false },
+    { id: "gen-docs", filename: "gen-docs.md", installed: false },
   ]);
   const [operating, setOperating] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -430,6 +559,7 @@ export function ClaudeCommandInstaller() {
         "code-review": CODE_REVIEW_CONTENT,
         "debug": DEBUG_CONTENT,
         "gen-tests": GEN_TESTS_CONTENT,
+        "gen-docs": GEN_DOCS_CONTENT,
       };
       const content = contentMap[cmdId] ?? "";
       const cmd = commands.find((c) => c.id === cmdId);
