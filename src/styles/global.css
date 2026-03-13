@@ -594,10 +594,10 @@ html, body, #root {
   flex-direction: column;
 }
 
-/* Scrollbar — thin, subtle */
+/* Scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -606,7 +606,8 @@ html, body, #root {
 
 ::-webkit-scrollbar-thumb {
   background: var(--border-light);
-  border-radius: 3px;
+  border-radius: 4px;
+  min-height: 15px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
