@@ -24,18 +24,23 @@ pub fn run() {
                 warmup: std::sync::Arc::new(std::sync::Mutex::new(None)),
             });
 
-            // Clean up leftover temp files from previous sessions (once at startup)
-            terminal::TerminalSession::cleanup_stale_temp_files();
+            // 后台清理上次残留的临时文件（不阻塞启动）
+            std::thread::spawn(|| {
+                terminal::TerminalSession::cleanup_stale_temp_files();
+            });
 
             // 后台线程预加载 shell 环境变量（供 claude -p 使用，不阻塞启动）
             commands::provider_commands::preload_shell_env();
 
-            // Set the app icon for the main window (visible in Dock / taskbar during dev)
+            // 后台设置应用图标（不阻塞窗口显示）
             if let Some(window) = app.get_webview_window("main") {
-                let icon_bytes = include_bytes!("../icons/icon.png");
-                let icon = tauri::image::Image::from_bytes(icon_bytes)
-                    .expect("failed to load app icon");
-                let _ = window.set_icon(icon);
+                let win = window.clone();
+                std::thread::spawn(move || {
+                    let icon_bytes = include_bytes!("../icons/icon.png");
+                    if let Ok(icon) = tauri::image::Image::from_bytes(icon_bytes) {
+                        let _ = win.set_icon(icon);
+                    }
+                });
             }
 
             Ok(())

@@ -71,6 +71,7 @@ pub async fn send_message(
         tokens.insert(thread_id.clone(), tx);
     }
 
+    state.ensure_http_client();
     let client = state.http_client.read().unwrap().clone();
 
     // Route to the correct provider adapter
@@ -117,6 +118,7 @@ pub async fn test_api_key(
     api_key: String,
     base_url: Option<String>,
 ) -> AppResult<bool> {
+    state.ensure_http_client();
     let client = state.http_client.read().unwrap().clone();
     match provider.as_str() {
         "anthropic" => {
