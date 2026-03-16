@@ -37,6 +37,12 @@ export function getAllPaneIds(node: LayoutNode): string[] {
   return [...getAllPaneIds(node.children[0]), ...getAllPaneIds(node.children[1])];
 }
 
+/* ── 收集所有叶子节点 ── */
+export function collectLeaves(node: LayoutNode): LayoutLeaf[] {
+  if (node.type === "leaf") return [node];
+  return [...collectLeaves(node.children[0]), ...collectLeaves(node.children[1])];
+}
+
 /* ── 在指定叶子处拆分，返回新树 ── */
 export function splitLeaf(
   root: LayoutNode,

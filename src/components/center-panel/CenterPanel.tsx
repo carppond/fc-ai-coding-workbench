@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { Plus, X, RotateCw, Sparkles } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useProjectStore } from "../../stores/projectStore";
@@ -12,7 +13,7 @@ import {
   LayoutNode, LayoutLeaf,
   countLeaves, splitLeaf, removeLeaf,
   updateLeafAlive, replaceLeaf, findLeafCwd, isLeafAlive,
-  findLinkedSplit, updateRatio,
+  findLinkedSplit, updateRatio, collectLeaves,
 } from "./layoutTree";
 
 /* ── 数据结构 ────────────────────────────────────────── */
@@ -100,6 +101,27 @@ export function CenterPanel() {
   // split DOM 元素 ref（用于拖拽时直接操作 DOM flex）
   const splitDomRef = useRef<Map<string, HTMLDivElement>>(new Map());
 
+  // tabs ref（供 effect 读取最新值而不加入依赖）
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
+
+  // 延迟聚焦（拆分后新 pane 需要等 Terminal mount 完成才能 focus）
+  const pendingFocusPaneRef = useRef<string | null>(null);
+
+  // 持久化 portal host 元素（每个 pane 一个，layout 变化时不重建）
+  const portalHostRef = useRef<Map<string, HTMLDivElement>>(new Map());
+
+  function ensurePortalHost(paneId: string): HTMLDivElement {
+    let host = portalHostRef.current.get(paneId);
+    if (!host) {
+      host = document.createElement("div");
+      host.style.width = "100%";
+      host.style.height = "100%";
+      portalHostRef.current.set(paneId, host);
+    }
+    return host;
+  }
+
   /* ── pane 级别的 session/focus 映射（key = paneId）── */
   const sessionMapRef = useRef<Map<string, string>>(new Map());
   const focusMapRef = useRef<Map<string, () => void>>(new Map());
@@ -127,6 +149,8 @@ export function CenterPanel() {
       setTabs([tab]);
       setActiveTabId(tab.id);
       activePaneIdRef.current.clear();
+      portalHostRef.current.clear();
+      hasCdRef.current = false;
       setFocusedPaneId(null);
     }
     prevProjectIdRef.current = projectId;
@@ -139,6 +163,57 @@ export function CenterPanel() {
     document.addEventListener("click", handler);
     return () => document.removeEventListener("click", handler);
   }, [tabContextMenu, addMenuPos]);
+
+  /* ── 聚焦管理 ──
+   * Terminal 自身的 visible effect 会在 visible→true 时 auto-focus（处理首次启动、tab 切换）。
+   * CenterPanel 通过 pendingFocusPaneRef 在以下场景覆盖为正确的 pane：
+   *   - 拆分后 → 聚焦新 pane
+   *   - 新建 tab → 聚焦新 tab 的 pane
+   *   - 关闭 pane → 聚焦剩余 pane
+   *   - 切到多 pane tab → 聚焦上次活跃 pane（覆盖 Terminal 的 auto-focus）
+   */
+  // 切到多 pane tab 时，覆盖 Terminal 的 auto-focus 为正确的 pane
+  useEffect(() => {
+    if (activeTab !== "terminal") return;
+    const tab = tabsRef.current.find((t) => t.id === activeTabId);
+    if (!tab || countLeaves(tab.layout) <= 1) return;
+    // 单 pane 不干预（Terminal auto-focus 已经正确）
+    const paneId = activePaneIdRef.current.get(activeTabId) || firstPaneId(tab.layout);
+    pendingFocusPaneRef.current = paneId;
+  }, [activeTab, activeTabId]);
+
+  // 执行延迟聚焦（拆分/关闭/多 pane tab 切换时，覆盖 Terminal auto-focus）
+  useEffect(() => {
+    const paneId = pendingFocusPaneRef.current;
+    if (!paneId) return;
+    pendingFocusPaneRef.current = null;
+    // Terminal auto-focus 用 rAF，这里也用 rAF 但排在后面（parent effect 晚于 child effect 注册 rAF）
+    requestAnimationFrame(() => {
+      focusMapRef.current.get(paneId)?.();
+    });
+  });
+
+  /* ── 项目路径延迟加载修复 ──
+   * projectPath 从 SQLite 异步加载，首次渲染时可能为 null。
+   * Terminal init effect 的 rAF 此时读到 null → 不 cd → 显示 ~ $。
+   * 这里监听 projectPath 从 null 变为有效值，主动 cd 当前终端。
+   */
+  const hasCdRef = useRef(false);
+  useEffect(() => {
+    if (!projectPath || hasCdRef.current) return;
+    hasCdRef.current = true;
+    // 延迟等待 Terminal session 就绪
+    const timer = setTimeout(() => {
+      const tab = tabsRef.current.find((t) => t.id === activeTabId);
+      if (!tab) return;
+      const paneId = activePaneIdRef.current.get(activeTabId) || firstPaneId(tab.layout);
+      const sessionId = sessionMapRef.current.get(paneId);
+      if (sessionId) {
+        ipc.terminalCd(sessionId, projectPath);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [projectPath, activeTabId]);
 
   /* ── Pane alive 变化 ── */
   const handlePaneAliveChange = useCallback((tabId: string, paneId: string, alive: boolean) => {
@@ -161,6 +236,8 @@ export function CenterPanel() {
       return [...prev, tab];
     });
     setActiveTabId(tab.id);
+    // 聚焦新 tab 的 pane
+    pendingFocusPaneRef.current = firstPaneId(tab.layout);
   }, [openFilePath, closeFile]);
 
   /* ── 右键 + 选择目录新建 ── */
@@ -193,9 +270,10 @@ export function CenterPanel() {
 
   /* ── 关闭 Pane（二叉树版）── */
   const handleClosePane = useCallback((tabId: string, paneId: string) => {
-    // 清理旧 pane 的 session/focus 映射
+    // 清理旧 pane 的 session/focus/portal 映射
     sessionMapRef.current.delete(paneId);
     focusMapRef.current.delete(paneId);
+    portalHostRef.current.delete(paneId);
     setTabs((prev) => {
       const tab = prev.find((t) => t.id === tabId);
       if (!tab) return prev;
@@ -213,12 +291,13 @@ export function CenterPanel() {
         activePaneIdRef.current.delete(tabId);
         return next;
       }
-      // 更新焦点 pane
+      // 更新焦点 pane 并聚焦
       const curFocus = activePaneIdRef.current.get(tabId);
       if (curFocus === paneId) {
-        const firstId = firstPaneId(newLayout);
-        activePaneIdRef.current.set(tabId, firstId);
-        setFocusedPaneId(firstId);
+        const nextId = firstPaneId(newLayout);
+        activePaneIdRef.current.set(tabId, nextId);
+        setFocusedPaneId(nextId);
+        pendingFocusPaneRef.current = nextId;
       }
       return prev.map((t) => t.id !== tabId ? t : { ...t, layout: newLayout });
     });
@@ -227,15 +306,23 @@ export function CenterPanel() {
   /* ── 分屏（二叉树版）── */
   const handleSplitPane = useCallback((tabId: string, paneId: string, direction: "horizontal" | "vertical") => {
     setTabContextMenu(null);
+    const newPaneId = nextPaneId();
+    let didSplit = false;
     setTabs((prev) => prev.map((tab) => {
       if (tab.id !== tabId) return tab;
       if (countLeaves(tab.layout) >= MAX_PANES_PER_TAB) return tab;
       const sourceCwd = findLeafCwd(tab.layout, paneId);
-      const newPaneId = nextPaneId();
       const newLayout = splitLeaf(tab.layout, paneId, direction, newPaneId, sourceCwd);
       if (newLayout === tab.layout) return tab;
+      didSplit = true;
       return { ...tab, layout: newLayout };
     }));
+    if (didSplit) {
+      // 将焦点切到新 pane（header 高亮 + 延迟 xterm focus）
+      activePaneIdRef.current.set(tabId, newPaneId);
+      setFocusedPaneId(newPaneId);
+      pendingFocusPaneRef.current = newPaneId;
+    }
   }, []);
 
   /* ── Cmd+W / Ctrl+W 关闭当前面板 ── */
@@ -268,6 +355,8 @@ export function CenterPanel() {
 
   /* ── Pane 焦点 ── */
   const handlePaneFocus = useCallback((tabId: string, paneId: string) => {
+    // 已聚焦则跳过，避免不必要的 re-render
+    if (activePaneIdRef.current.get(tabId) === paneId) return;
     activePaneIdRef.current.set(tabId, paneId);
     setFocusedPaneId(paneId);
   }, []);
@@ -318,6 +407,8 @@ export function CenterPanel() {
   /* ── 重启 Pane（二叉树版）── */
   const handleRestartPane = useCallback((tabId: string, paneId: string) => {
     const newId = nextPaneId();
+    // 清理旧 pane 的 portal host
+    portalHostRef.current.delete(paneId);
     // 更新 activePaneIdRef
     if (activePaneIdRef.current.get(tabId) === paneId) {
       activePaneIdRef.current.set(tabId, newId);
@@ -402,7 +493,7 @@ export function CenterPanel() {
     y: Math.min(e.clientY, window.innerHeight - h - 8),
   });
 
-  /* ── 递归渲染布局树 ── */
+  /* ── 递归渲染布局树（不含 Terminal，Terminal 通过 portal 单独渲染）── */
   const renderLayout = useCallback((
     node: LayoutNode,
     tabId: string,
@@ -436,21 +527,22 @@ export function CenterPanel() {
               </span>
             </div>
           )}
-          {/* Terminal */}
-          <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
-            <Terminal
-              key={node.paneId}
-              projectPath={projectPath}
-              cwd={node.cwd}
-              onAliveChange={(alive) => handlePaneAliveChange(tabId, node.paneId, alive)}
-              onSessionReady={(sid) => handlePaneSessionReady(node.paneId, sid)}
-              onFocusReady={(fn) => handlePaneFocusReady(node.paneId, fn)}
-              visible={isActive}
-            />
-            {/* 退出覆盖层 */}
+          {/* Terminal 挂载点 — portal host 会被 appendChild 到此处 */}
+          <div
+            style={{ flex: 1, minHeight: 0, position: "relative" }}
+            ref={(el) => {
+              const host = ensurePortalHost(node.paneId);
+              if (el && host.parentElement !== el) {
+                el.appendChild(host);
+              }
+            }}
+          >
+            {/* 退出覆盖层（叠加在 portal host 之上）*/}
             {isActive && !node.alive && (
               <div className={showPaneHeader ? "pane-exited-overlay" : "terminal-exited-overlay"}
-                style={showPaneHeader ? { position: "absolute", bottom: 0, left: 0, right: 0 } : undefined}
+                style={showPaneHeader
+                  ? { position: "absolute", bottom: 0, left: 0, right: 0, zIndex: 1 }
+                  : undefined}
               >
                 <span>{t("terminal.exited")}</span>
                 <button
@@ -496,8 +588,7 @@ export function CenterPanel() {
         </div>
       </div>
     );
-  }, [focusedPaneId, projectPath, t, handlePaneFocus, handleClosePane, handlePaneAliveChange,
-      handlePaneSessionReady, handlePaneFocusReady, handleRestartPane, handleDividerDrag]);
+  }, [focusedPaneId, t, handlePaneFocus, handleClosePane, handleRestartPane, handleDividerDrag]);
 
   /* ── 渲染 ── */
   return (
@@ -630,7 +721,7 @@ export function CenterPanel() {
           </div>
         )}
 
-        {/* Terminal panes — 二叉树递归布局 */}
+        {/* Terminal panes — 二叉树递归布局（仅骨架，Terminal 通过 portal 挂载）*/}
         <div style={{ width: "100%", height: "100%", display: activeTab === "terminal" ? "block" : "none" }}>
           {tabs.map((tab) => {
             const isActive = activeTabId === tab.id && activeTab === "terminal";
@@ -650,6 +741,35 @@ export function CenterPanel() {
           })}
         </div>
       </div>
+
+      {/* Terminal 实例 — 通过 portal 渲染到持久化 DOM 容器，layout 变化不会卸载 */}
+      {tabs.flatMap((tab) => {
+        const isTabActive = activeTabId === tab.id && activeTab === "terminal";
+        const multiPane = countLeaves(tab.layout) > 1;
+        return collectLeaves(tab.layout).map((leaf) => {
+          // ensurePortalHost 保证 render 阶段就创建好 host（ref callback 会将其挂载到 DOM）
+          const host = ensurePortalHost(leaf.paneId);
+          return createPortal(
+            <div
+              style={{ width: "100%", height: "100%" }}
+              // Portal 内的 React 事件不会冒泡到 layout 树的叶子 wrapper，
+              // 需要在此处追踪焦点，确保"开启CC"等功能作用于正确的 pane
+              onMouseDown={multiPane ? () => handlePaneFocus(tab.id, leaf.paneId) : undefined}
+            >
+              <Terminal
+                projectPath={projectPath}
+                cwd={leaf.cwd}
+                onAliveChange={(alive) => handlePaneAliveChange(tab.id, leaf.paneId, alive)}
+                onSessionReady={(sid) => handlePaneSessionReady(leaf.paneId, sid)}
+                onFocusReady={(fn) => handlePaneFocusReady(leaf.paneId, fn)}
+                visible={isTabActive}
+              />
+            </div>,
+            host,
+            leaf.paneId, // key — 确保拆分导致数组 index 变化时 React 不会卸载已有 Terminal
+          );
+        });
+      })}
 
       {/* ── Tab 右键菜单 ── */}
       {tabContextMenu && (() => {

@@ -505,7 +505,8 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
           /* container not visible yet */
         }
       }
-      // Focus terminal after DOM has painted (display:none → block needs a frame)
+      // visible 变 true 时聚焦（tab 切换 / 首次 mount）
+      // 多 pane 时 CenterPanel 会在之后覆盖为正确的 pane
       requestAnimationFrame(() => {
         xtermRef.current?.focus();
       });
@@ -649,7 +650,8 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
       }
 
       // 拦截修饰键单独按下，防止 xterm 内部处理触发 scroll-to-cursor
-      if (e.key === "Meta" || e.key === "Control" || e.key === "Alt" || e.key === "Shift") {
+      // 注意：不拦截 Shift，否则按住 Shift 快速打字会丢字/卡顿
+      if (e.key === "Meta" || e.key === "Control" || e.key === "Alt") {
         return false;
       }
 
@@ -801,6 +803,8 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
     const onResize = () => {
       // Skip resize when terminal is hidden — no point fitting an invisible container
       if (!visibleRef.current) return;
+      // 跳过 0 尺寸容器（portal host 在 reparenting 期间会短暂脱离 DOM）
+      if (container.clientWidth === 0 || container.clientHeight === 0) return;
       // Fit immediately so characters never appear stretched
       safeFit();
       // Debounce PTY resize: only notify after resize settles, so CLI apps
