@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, useLayoutEffect } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { Plus, X, RotateCw, Sparkles } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useProjectStore } from "../../stores/projectStore";
@@ -8,20 +8,19 @@ import { Terminal } from "./Terminal";
 import { FileViewer } from "./FileViewer";
 import { useConfirm } from "../common/ConfirmDialog";
 import * as ipc from "../../ipc/commands";
+import {
+  LayoutNode, LayoutLeaf,
+  countLeaves, splitLeaf, removeLeaf,
+  updateLeafAlive, replaceLeaf, findLeafCwd, isLeafAlive,
+  findLinkedSplit, updateRatio,
+} from "./layoutTree";
 
 /* ── 数据结构 ────────────────────────────────────────── */
-
-interface TerminalPane {
-  id: string;
-  alive: boolean;
-  cwd?: string; // undefined = 项目目录
-}
 
 interface TerminalTab {
   id: string;
   title: string;
-  panes: TerminalPane[];
-  splitDirection: "horizontal" | "vertical" | null; // null = 单窗格
+  layout: LayoutNode;
 }
 
 const MAX_TABS = 5;
@@ -40,7 +39,8 @@ function nextPaneId(): string {
 
 function makeTab(title: string, cwd?: string): TerminalTab {
   const id = nextTabId();
-  return { id, title, panes: [{ id: nextPaneId(), alive: true, cwd }], splitDirection: null };
+  const leaf: LayoutLeaf = { type: "leaf", paneId: nextPaneId(), alive: true, cwd };
+  return { id, title, layout: leaf };
 }
 
 /* ── 右键菜单状态类型 ────────────────────────────────── */
@@ -51,6 +51,18 @@ interface ContextMenuPos {
 }
 interface TabContextMenu extends ContextMenuPos {
   tabId: string;
+}
+
+/* ── 检查 layout 中是否有任何存活的 pane ── */
+function hasAliveLeaf(node: LayoutNode): boolean {
+  if (node.type === "leaf") return node.alive;
+  return hasAliveLeaf(node.children[0]) || hasAliveLeaf(node.children[1]);
+}
+
+/* ── 获取第一个叶子的 paneId ── */
+function firstPaneId(node: LayoutNode): string {
+  if (node.type === "leaf") return node.paneId;
+  return firstPaneId(node.children[0]);
 }
 
 /* ── 组件 ─────────────────────────────────────────────── */
@@ -85,8 +97,8 @@ export function CenterPanel() {
   const projectPath = activeProject?.path ?? null;
   const projectId = activeProject?.id ?? null;
 
-  // Tab 容器 ref（用于关闭 pane 后重置拖拽设置的内联 flex）
-  const tabContainerRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  // split DOM 元素 ref（用于拖拽时直接操作 DOM flex）
+  const splitDomRef = useRef<Map<string, HTMLDivElement>>(new Map());
 
   /* ── pane 级别的 session/focus 映射（key = paneId）── */
   const sessionMapRef = useRef<Map<string, string>>(new Map());
@@ -103,7 +115,7 @@ export function CenterPanel() {
 
   /* ── 获取 tab 的活跃 pane ── */
   const getActivePaneId = useCallback((tab: TerminalTab): string => {
-    return activePaneIdRef.current.get(tab.id) || tab.panes[0]?.id;
+    return activePaneIdRef.current.get(tab.id) || firstPaneId(tab.layout);
   }, []);
 
   /* ── 项目切换重置 ── */
@@ -132,7 +144,9 @@ export function CenterPanel() {
   const handlePaneAliveChange = useCallback((tabId: string, paneId: string, alive: boolean) => {
     setTabs((prev) => prev.map((tab) => {
       if (tab.id !== tabId) return tab;
-      return { ...tab, panes: tab.panes.map((p) => (p.id === paneId ? { ...p, alive } : p)) };
+      const newLayout = updateLeafAlive(tab.layout, paneId, alive);
+      if (newLayout === tab.layout) return tab;
+      return { ...tab, layout: newLayout };
     }));
   }, []);
 
@@ -177,13 +191,16 @@ export function CenterPanel() {
     activePaneIdRef.current.delete(tabId);
   }, []);
 
-  /* ── 关闭 Pane ── */
+  /* ── 关闭 Pane（二叉树版）── */
   const handleClosePane = useCallback((tabId: string, paneId: string) => {
+    // 清理旧 pane 的 session/focus 映射
+    sessionMapRef.current.delete(paneId);
+    focusMapRef.current.delete(paneId);
     setTabs((prev) => {
       const tab = prev.find((t) => t.id === tabId);
       if (!tab) return prev;
-      const remaining = tab.panes.filter((p) => p.id !== paneId);
-      if (remaining.length === 0) {
+      const newLayout = removeLeaf(tab.layout, paneId);
+      if (newLayout === null) {
         // 最后一个 pane → 关闭 tab
         if (prev.length <= 1) return prev;
         const idx = prev.findIndex((t) => t.id === tabId);
@@ -199,44 +216,25 @@ export function CenterPanel() {
       // 更新焦点 pane
       const curFocus = activePaneIdRef.current.get(tabId);
       if (curFocus === paneId) {
-        activePaneIdRef.current.set(tabId, remaining[0].id);
-        setFocusedPaneId(remaining[0].id);
+        const firstId = firstPaneId(newLayout);
+        activePaneIdRef.current.set(tabId, firstId);
+        setFocusedPaneId(firstId);
       }
-      return prev.map((t) => t.id !== tabId ? t : {
-        ...t,
-        panes: remaining,
-        splitDirection: remaining.length <= 1 ? null : t.splitDirection,
-      });
+      return prev.map((t) => t.id !== tabId ? t : { ...t, layout: newLayout });
     });
   }, []);
 
-  /* ── 关闭 pane 后重置拖拽残留的内联 flex ── */
-  useLayoutEffect(() => {
-    for (const tab of tabs) {
-      if (tab.panes.length <= 1) {
-        const container = tabContainerRefs.current.get(tab.id);
-        if (!container) continue;
-        const paneEls = Array.from(container.children).filter(
-          (c) => !(c as HTMLElement).classList.contains("pane-resize-handle")
-        ) as HTMLElement[];
-        for (const el of paneEls) {
-          el.style.flex = "1";
-        }
-      }
-    }
-  }, [tabs]);
-
-  /* ── 分屏 ── */
-  const handleSplitPane = useCallback((tabId: string, direction: "horizontal" | "vertical") => {
+  /* ── 分屏（二叉树版）── */
+  const handleSplitPane = useCallback((tabId: string, paneId: string, direction: "horizontal" | "vertical") => {
     setTabContextMenu(null);
     setTabs((prev) => prev.map((tab) => {
       if (tab.id !== tabId) return tab;
-      if (tab.panes.length >= MAX_PANES_PER_TAB) return tab;
-      if (tab.splitDirection && tab.splitDirection !== direction) return tab;
-      const focusPaneId = activePaneIdRef.current.get(tabId) || tab.panes[0].id;
-      const sourceCwd = tab.panes.find((p) => p.id === focusPaneId)?.cwd;
-      const newPane: TerminalPane = { id: nextPaneId(), alive: true, cwd: sourceCwd };
-      return { ...tab, panes: [...tab.panes, newPane], splitDirection: direction };
+      if (countLeaves(tab.layout) >= MAX_PANES_PER_TAB) return tab;
+      const sourceCwd = findLeafCwd(tab.layout, paneId);
+      const newPaneId = nextPaneId();
+      const newLayout = splitLeaf(tab.layout, paneId, direction, newPaneId, sourceCwd);
+      if (newLayout === tab.layout) return tab;
+      return { ...tab, layout: newLayout };
     }));
   }, []);
 
@@ -259,7 +257,7 @@ export function CenterPanel() {
         } else {
           const curTab = tabs.find((tab) => tab.id === activeTabId);
           if (!curTab) return;
-          const paneId = activePaneIdRef.current.get(activeTabId) || curTab.panes[0]?.id;
+          const paneId = activePaneIdRef.current.get(activeTabId) || firstPaneId(curTab.layout);
           if (paneId) handleClosePane(activeTabId, paneId);
         }
       }
@@ -300,8 +298,7 @@ export function CenterPanel() {
     const curTab = tabs.find((t) => t.id === activeTabId);
     if (!curTab) return;
     const paneId = getActivePaneId(curTab);
-    const pane = curTab.panes.find((p) => p.id === paneId);
-    if (!pane?.alive) return;
+    if (!isLeafAlive(curTab.layout, paneId)) return;
 
     const sessionId = sessionMapRef.current.get(paneId);
     if (!sessionId) return;
@@ -318,56 +315,80 @@ export function CenterPanel() {
     requestAnimationFrame(() => { focusMapRef.current.get(paneId)?.(); });
   }, [activeTabId, tabs, openFilePath, closeFile, getActivePaneId]);
 
-  /* ── 重启 Pane ── */
+  /* ── 重启 Pane（二叉树版）── */
   const handleRestartPane = useCallback((tabId: string, paneId: string) => {
+    const newId = nextPaneId();
+    // 更新 activePaneIdRef
+    if (activePaneIdRef.current.get(tabId) === paneId) {
+      activePaneIdRef.current.set(tabId, newId);
+    }
     setTabs((prev) => prev.map((tab) => {
       if (tab.id !== tabId) return tab;
-      return {
-        ...tab,
-        panes: tab.panes.map((p) => {
-          if (p.id !== paneId) return p;
-          const newId = nextPaneId();
-          // 更新 activePaneIdRef
-          if (activePaneIdRef.current.get(tabId) === paneId) {
-            activePaneIdRef.current.set(tabId, newId);
-          }
-          return { ...p, id: newId, alive: true };
-        }),
-      };
+      const newLayout = replaceLeaf(tab.layout, paneId, newId);
+      if (newLayout === tab.layout) return tab;
+      return { ...tab, layout: newLayout };
     }));
   }, []);
 
-  /* ── 分割线拖拽 ── */
-  const handleDividerDrag = useCallback((e: React.MouseEvent, paneIdx: number, vertical: boolean) => {
+  /* ── 分割线拖拽（二叉树版）── */
+  const handleDividerDrag = useCallback((e: React.MouseEvent, splitId: string, vertical: boolean, tabLayout: LayoutNode) => {
     e.preventDefault();
-    const handle = e.currentTarget as HTMLElement;
-    const container = handle.parentElement;
+    const container = splitDomRef.current.get(splitId);
     if (!container) return;
-    // 获取实际 pane 元素（跳过分割线）
-    const paneEls = Array.from(container.children).filter(
-      (c) => !(c as HTMLElement).classList.contains("pane-resize-handle")
-    ) as HTMLElement[];
-    const pane1 = paneEls[paneIdx - 1];
-    const pane2 = paneEls[paneIdx];
-    if (!pane1 || !pane2) return;
+    const child1 = container.children[0] as HTMLElement;
+    const child2 = container.children[2] as HTMLElement; // [0]=child1, [1]=handle, [2]=child2
+    if (!child1 || !child2) return;
+
+    // 4-pane 联动检测
+    const linkedSplitId = findLinkedSplit(tabLayout, splitId);
+    let linkedChild1: HTMLElement | null = null;
+    let linkedChild2: HTMLElement | null = null;
+    if (linkedSplitId) {
+      const linkedContainer = splitDomRef.current.get(linkedSplitId);
+      if (linkedContainer) {
+        linkedChild1 = linkedContainer.children[0] as HTMLElement;
+        linkedChild2 = linkedContainer.children[2] as HTMLElement;
+      }
+    }
 
     const startPos = vertical ? e.clientY : e.clientX;
-    const size1 = vertical ? pane1.offsetHeight : pane1.offsetWidth;
-    const size2 = vertical ? pane2.offsetHeight : pane2.offsetWidth;
+    const size1 = vertical ? child1.offsetHeight : child1.offsetWidth;
+    const size2 = vertical ? child2.offsetHeight : child2.offsetWidth;
     const total = size1 + size2;
 
     const onMove = (ev: MouseEvent) => {
       const delta = (vertical ? ev.clientY : ev.clientX) - startPos;
       const newSize1 = Math.max(60, Math.min(total - 60, size1 + delta));
       const ratio = newSize1 / total;
-      pane1.style.flex = String(ratio);
-      pane2.style.flex = String(1 - ratio);
+      child1.style.flex = String(ratio);
+      child2.style.flex = String(1 - ratio);
+      // 联动
+      if (linkedChild1 && linkedChild2) {
+        linkedChild1.style.flex = String(ratio);
+        linkedChild2.style.flex = String(1 - ratio);
+      }
     };
+
     const onUp = () => {
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
+      // 将最终 ratio 写入 state
+      const finalSize1 = vertical ? child1.offsetHeight : child1.offsetWidth;
+      const finalSize2 = vertical ? child2.offsetHeight : child2.offsetWidth;
+      const finalTotal = finalSize1 + finalSize2;
+      if (finalTotal > 0) {
+        const finalRatio = finalSize1 / finalTotal;
+        setTabs((prev) => prev.map((tab) => {
+          let newLayout = updateRatio(tab.layout, splitId, finalRatio);
+          if (linkedSplitId) {
+            newLayout = updateRatio(newLayout, linkedSplitId, finalRatio);
+          }
+          if (newLayout === tab.layout) return tab;
+          return { ...tab, layout: newLayout };
+        }));
+      }
     };
     document.body.style.cursor = vertical ? "row-resize" : "col-resize";
     document.body.style.userSelect = "none";
@@ -381,8 +402,102 @@ export function CenterPanel() {
     y: Math.min(e.clientY, window.innerHeight - h - 8),
   });
 
-  /* ── 判断当前 tab 是否有任何 pane alive ── */
-  const isTabAlive = (tab: TerminalTab) => tab.panes.some((p) => p.alive);
+  /* ── 递归渲染布局树 ── */
+  const renderLayout = useCallback((
+    node: LayoutNode,
+    tabId: string,
+    isActive: boolean,
+    showPaneHeader: boolean,
+    tabLayout: LayoutNode,
+  ): React.ReactNode => {
+    if (node.type === "leaf") {
+      const isFocused = focusedPaneId === node.paneId
+        || (!activePaneIdRef.current.has(tabId) && node.paneId === firstPaneId(tabLayout));
+      return (
+        <div
+          key={node.paneId}
+          style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}
+          onClick={showPaneHeader ? () => handlePaneFocus(tabId, node.paneId) : undefined}
+        >
+          {/* Pane header — 仅多 pane 时显示 */}
+          {showPaneHeader && (
+            <div className={`pane-header ${isFocused ? "pane-header--active" : ""}`}>
+              <span className="pane-header__title">
+                {node.cwd ? node.cwd.split("/").pop() : "Terminal"}
+              </span>
+              <span
+                className="pane-header__close"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleClosePane(tabId, node.paneId);
+                }}
+              >
+                <X size={11} />
+              </span>
+            </div>
+          )}
+          {/* Terminal */}
+          <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+            <Terminal
+              key={node.paneId}
+              projectPath={projectPath}
+              cwd={node.cwd}
+              onAliveChange={(alive) => handlePaneAliveChange(tabId, node.paneId, alive)}
+              onSessionReady={(sid) => handlePaneSessionReady(node.paneId, sid)}
+              onFocusReady={(fn) => handlePaneFocusReady(node.paneId, fn)}
+              visible={isActive}
+            />
+            {/* 退出覆盖层 */}
+            {isActive && !node.alive && (
+              <div className={showPaneHeader ? "pane-exited-overlay" : "terminal-exited-overlay"}
+                style={showPaneHeader ? { position: "absolute", bottom: 0, left: 0, right: 0 } : undefined}
+              >
+                <span>{t("terminal.exited")}</span>
+                <button
+                  className="btn btn--primary btn--sm"
+                  onClick={() => handleRestartPane(tabId, node.paneId)}
+                >
+                  <RotateCw size={13} />
+                  {t("terminal.restart")}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // Split 节点：flex 容器 + 分割线
+    const isVertical = node.direction === "vertical";
+    return (
+      <div
+        key={node.id}
+        ref={(el) => {
+          if (el) splitDomRef.current.set(node.id, el);
+          else splitDomRef.current.delete(node.id);
+        }}
+        style={{
+          flex: 1,
+          minWidth: 0,
+          minHeight: 0,
+          display: "flex",
+          flexDirection: isVertical ? "column" : "row",
+        }}
+      >
+        <div style={{ flex: node.ratio, minWidth: 0, minHeight: 0, display: "flex", flexDirection: isVertical ? "column" : "row" }}>
+          {renderLayout(node.children[0], tabId, isActive, showPaneHeader, tabLayout)}
+        </div>
+        <div
+          className={`pane-resize-handle ${isVertical ? "pane-resize-handle--vertical" : ""}`}
+          onMouseDown={(e) => handleDividerDrag(e, node.id, isVertical, tabLayout)}
+        />
+        <div style={{ flex: 1 - node.ratio, minWidth: 0, minHeight: 0, display: "flex", flexDirection: isVertical ? "column" : "row" }}>
+          {renderLayout(node.children[1], tabId, isActive, showPaneHeader, tabLayout)}
+        </div>
+      </div>
+    );
+  }, [focusedPaneId, projectPath, t, handlePaneFocus, handleClosePane, handlePaneAliveChange,
+      handlePaneSessionReady, handlePaneFocusReady, handleRestartPane, handleDividerDrag]);
 
   /* ── 渲染 ── */
   return (
@@ -412,7 +527,7 @@ export function CenterPanel() {
           >
             <span
               className="panel-tab__label"
-              style={{ opacity: isTabAlive(tab) ? 1 : 0.5 }}
+              style={{ opacity: hasAliveLeaf(tab.layout) ? 1 : 0.5 }}
             >
               {editingTabId === tab.id ? (
                 <input
@@ -515,98 +630,21 @@ export function CenterPanel() {
           </div>
         )}
 
-        {/* Terminal panes — flexbox 布局 + 拖拽分割线 */}
+        {/* Terminal panes — 二叉树递归布局 */}
         <div style={{ width: "100%", height: "100%", display: activeTab === "terminal" ? "block" : "none" }}>
           {tabs.map((tab) => {
             const isActive = activeTabId === tab.id && activeTab === "terminal";
-            const isVertical = tab.splitDirection === "vertical";
-            const showPaneHeader = tab.panes.length > 1;
+            const showPaneHeader = countLeaves(tab.layout) > 1;
 
             return (
               <div
                 key={tab.id}
-                ref={(el) => {
-                  if (el) tabContainerRefs.current.set(tab.id, el);
-                  else tabContainerRefs.current.delete(tab.id);
-                }}
                 style={{
                   width: "100%", height: "100%",
                   display: isActive ? "flex" : "none",
-                  flexDirection: isVertical ? "column" : "row",
                 }}
               >
-                {tab.panes.flatMap((pane, idx) => {
-                  const isFocused = focusedPaneId === pane.id
-                    || (!activePaneIdRef.current.has(tab.id) && pane.id === tab.panes[0].id);
-                  const elements: React.ReactNode[] = [];
-
-                  {/* 分割线 */}
-                  if (idx > 0) {
-                    elements.push(
-                      <div
-                        key={`divider-${pane.id}`}
-                        className={`pane-resize-handle ${isVertical ? "pane-resize-handle--vertical" : ""}`}
-                        onMouseDown={(e) => handleDividerDrag(e, idx, isVertical)}
-                      />
-                    );
-                  }
-
-                  {/* Pane */}
-                  elements.push(
-                    <div
-                      key={pane.id}
-                      style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}
-                      onClick={showPaneHeader ? () => handlePaneFocus(tab.id, pane.id) : undefined}
-                    >
-                      {/* Pane header — 仅多 pane 时显示 */}
-                      {showPaneHeader && (
-                        <div className={`pane-header ${isFocused ? "pane-header--active" : ""}`}>
-                          <span className="pane-header__title">
-                            {pane.cwd ? pane.cwd.split("/").pop() : "Terminal"}
-                          </span>
-                          <span
-                            className="pane-header__close"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleClosePane(tab.id, pane.id);
-                            }}
-                          >
-                            <X size={11} />
-                          </span>
-                        </div>
-                      )}
-                      {/* Terminal */}
-                      <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
-                        <Terminal
-                          key={pane.id}
-                          projectPath={projectPath}
-                          cwd={pane.cwd}
-                          onAliveChange={(alive) => handlePaneAliveChange(tab.id, pane.id, alive)}
-                          onSessionReady={(sid) => handlePaneSessionReady(pane.id, sid)}
-                          onFocusReady={(fn) => handlePaneFocusReady(pane.id, fn)}
-                          visible={isActive}
-                        />
-                        {/* 退出覆盖层 */}
-                        {isActive && !pane.alive && (
-                          <div className={showPaneHeader ? "pane-exited-overlay" : "terminal-exited-overlay"}
-                            style={showPaneHeader ? { position: "absolute", bottom: 0, left: 0, right: 0 } : undefined}
-                          >
-                            <span>{t("terminal.exited")}</span>
-                            <button
-                              className="btn btn--primary btn--sm"
-                              onClick={() => handleRestartPane(tab.id, pane.id)}
-                            >
-                              <RotateCw size={13} />
-                              {t("terminal.restart")}
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-
-                  return elements;
-                })}
+                {renderLayout(tab.layout, tab.id, isActive, showPaneHeader, tab.layout)}
               </div>
             );
           })}
@@ -616,8 +654,9 @@ export function CenterPanel() {
       {/* ── Tab 右键菜单 ── */}
       {tabContextMenu && (() => {
         const tab = tabs.find((t) => t.id === tabContextMenu.tabId);
-        const canSplitH = tab && (tab.splitDirection === null || tab.splitDirection === "horizontal") && tab.panes.length < MAX_PANES_PER_TAB;
-        const canSplitV = tab && (tab.splitDirection === null || tab.splitDirection === "vertical") && tab.panes.length < MAX_PANES_PER_TAB;
+        const leafCount = tab ? countLeaves(tab.layout) : 0;
+        const canSplit = leafCount < MAX_PANES_PER_TAB;
+        const focusPaneId = tab ? (activePaneIdRef.current.get(tab.id) || firstPaneId(tab.layout)) : "";
         return (
           <div
             className="context-menu"
@@ -628,16 +667,16 @@ export function CenterPanel() {
               {t("terminal.rename")}
             </div>
             <div
-              className={`context-menu__item ${!canSplitH ? "context-menu__item--disabled" : ""}`}
-              onClick={() => canSplitH && handleSplitPane(tabContextMenu.tabId, "horizontal")}
-              style={!canSplitH ? { opacity: 0.4, cursor: "default" } : undefined}
+              className={`context-menu__item ${!canSplit ? "context-menu__item--disabled" : ""}`}
+              onClick={() => canSplit && handleSplitPane(tabContextMenu.tabId, focusPaneId, "horizontal")}
+              style={!canSplit ? { opacity: 0.4, cursor: "default" } : undefined}
             >
               {t("terminal.splitRight")}
             </div>
             <div
-              className={`context-menu__item ${!canSplitV ? "context-menu__item--disabled" : ""}`}
-              onClick={() => canSplitV && handleSplitPane(tabContextMenu.tabId, "vertical")}
-              style={!canSplitV ? { opacity: 0.4, cursor: "default" } : undefined}
+              className={`context-menu__item ${!canSplit ? "context-menu__item--disabled" : ""}`}
+              onClick={() => canSplit && handleSplitPane(tabContextMenu.tabId, focusPaneId, "vertical")}
+              style={!canSplit ? { opacity: 0.4, cursor: "default" } : undefined}
             >
               {t("terminal.splitDown")}
             </div>
