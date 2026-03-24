@@ -148,6 +148,18 @@ export const FileTreeItem = memo(function FileTreeItem({ entry, depth, defaultEx
   }, [contextMenu]);
 
   const handleClick = () => {
+    // 点击文件/目录时，自动切换 activeProject 到对应的项目根
+    const { activeProject, projects, selectedProjectIds, setActiveProject } = useProjectStore.getState();
+    if (selectedProjectIds.size > 1 && activeProject) {
+      // 找到该路径所属的项目
+      const ownerProject = projects.find(
+        (p) => selectedProjectIds.has(p.id) && (entry.path === p.path || entry.path.startsWith(p.path + "/")),
+      );
+      if (ownerProject && ownerProject.id !== activeProject.id) {
+        setActiveProject(ownerProject);
+      }
+    }
+
     if (isDir) {
       toggleExpand(entry.path);
     } else {
