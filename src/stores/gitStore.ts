@@ -614,9 +614,10 @@ export const useGitStore = create<GitState>((set, get) => ({
   },
 
   commit: async (projectPath) => {
-    // 优先从 repoStates 读提交消息（workspace 模式），fallback 到扁平字段
+    // 优先用扁平字段（单项目模式），repoStates 作为 fallback
+    const flatMsg = get().commitMessage;
     const repoMsg = get().repoStates[projectPath]?.commitMessage;
-    const msg = (repoMsg ?? get().commitMessage).trim();
+    const msg = (flatMsg || repoMsg || "").trim();
     if (!msg) return false;
     if (get().operating) return false;
     set({ operating: true, operationType: "commit", error: null });
