@@ -65,6 +65,83 @@
   flex: 1;
 }
 
+/* Workspace 下拉菜单 */
+.workspace-menu {
+  position: relative;
+  -webkit-app-region: no-drag;
+}
+
+.workspace-menu__trigger {
+  cursor: pointer;
+}
+
+.workspace-menu__dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 220px;
+  max-height: 400px;
+  overflow: auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  z-index: 1000;
+  padding: 4px 0;
+}
+
+.workspace-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.workspace-menu__item:hover {
+  background: var(--bg-hover);
+}
+
+.workspace-menu__item--active {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.workspace-menu__item--danger {
+  color: var(--error);
+}
+
+.workspace-menu__separator {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+.workspace-menu__input-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+}
+
+.workspace-menu__input {
+  flex: 1;
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.workspace-menu__input:focus {
+  border-color: var(--accent);
+}
+
 .top-bar__search {
   display: flex;
   align-items: center;
@@ -1193,6 +1270,108 @@
   display: flex;
   gap: 6px;
   justify-content: flex-end;
+}
+
+/* RepoSection — 多仓库分组 */
+.repo-sections {
+  overflow: auto;
+}
+
+.repo-section {
+  border-bottom: 1px solid var(--border);
+}
+
+.repo-section__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  user-select: none;
+  transition: background var(--transition-fast);
+}
+
+.repo-section__header:hover {
+  background: var(--bg-hover);
+}
+
+.repo-section__name {
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+
+.repo-section__badge {
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.repo-section__badge--muted {
+  font-style: italic;
+  font-size: 10px;
+}
+
+.repo-section__branch {
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--accent);
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.repo-section__actions {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.repo-section__header:hover .repo-section__actions {
+  opacity: 1;
+}
+
+.repo-section__body {
+  padding: 0 4px 6px;
+}
+
+.repo-section__commit {
+  margin-top: 6px;
+  padding: 0 8px;
+}
+
+.repo-section__commit .git-actions__input {
+  width: 100%;
+  resize: none;
+  font-size: 12px;
+  padding: 6px 8px;
+  min-height: 0;
+}
+
+.repo-section__commit-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  align-items: center;
+}
+
+.btn--xs {
+  padding: 2px 4px;
+  font-size: 11px;
+  border-radius: 3px;
+  min-width: 0;
+  min-height: 0;
+  line-height: 1;
 }
 
 /* 拖拽分割手柄 */
@@ -3462,6 +3641,21 @@
   min-width: 32px;
   text-align: right;
   font-family: var(--font-mono, "SF Mono", monospace);
+}
+
+.font-settings__select {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  outline: none;
+  cursor: pointer;
+}
+
+.font-settings__select:focus {
+  border-color: var(--accent);
 }
 
 /* ========================================

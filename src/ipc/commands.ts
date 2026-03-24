@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  Workspace,
   Project,
   Session,
   Thread,
@@ -13,6 +14,26 @@ import type {
   TagEntry,
   ChatMessage,
 } from "../lib/types";
+
+// --- Workspaces ---
+
+export const createWorkspace = (name: string) =>
+  invoke<Workspace>("create_workspace", { name });
+
+export const listWorkspaces = () =>
+  invoke<Workspace[]>("list_workspaces");
+
+export const getWorkspace = (id: string) =>
+  invoke<Workspace | null>("get_workspace", { id });
+
+export const updateWorkspace = (id: string, name: string, projectIdsJson: string) =>
+  invoke<void>("update_workspace", { id, name, projectIdsJson });
+
+export const deleteWorkspace = (id: string) =>
+  invoke<void>("delete_workspace", { id });
+
+export const updateWorkspaceTimestamp = (id: string) =>
+  invoke<void>("update_workspace_timestamp", { id });
 
 // --- Projects ---
 

@@ -150,7 +150,6 @@ export function CenterPanel() {
       setActiveTabId(tab.id);
       activePaneIdRef.current.clear();
       portalHostRef.current.clear();
-      hasCdRef.current = false;
       setFocusedPaneId(null);
     }
     prevProjectIdRef.current = projectId;
@@ -192,28 +191,6 @@ export function CenterPanel() {
       focusMapRef.current.get(paneId)?.();
     });
   });
-
-  /* ── 项目路径延迟加载修复 ──
-   * projectPath 从 SQLite 异步加载，首次渲染时可能为 null。
-   * Terminal init effect 的 rAF 此时读到 null → 不 cd → 显示 ~ $。
-   * 这里监听 projectPath 从 null 变为有效值，主动 cd 当前终端。
-   */
-  const hasCdRef = useRef(false);
-  useEffect(() => {
-    if (!projectPath || hasCdRef.current) return;
-    hasCdRef.current = true;
-    // 延迟等待 Terminal session 就绪
-    const timer = setTimeout(() => {
-      const tab = tabsRef.current.find((t) => t.id === activeTabId);
-      if (!tab) return;
-      const paneId = activePaneIdRef.current.get(activeTabId) || firstPaneId(tab.layout);
-      const sessionId = sessionMapRef.current.get(paneId);
-      if (sessionId) {
-        ipc.terminalCd(sessionId, projectPath);
-      }
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [projectPath, activeTabId]);
 
   /* ── Pane alive 变化 ── */
   const handlePaneAliveChange = useCallback((tabId: string, paneId: string, alive: boolean) => {

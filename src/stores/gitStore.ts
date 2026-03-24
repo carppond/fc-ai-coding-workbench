@@ -14,6 +14,54 @@ interface SelectedFile {
   staged: boolean;
 }
 
+/** 单个仓库的 git 状态（用于多仓库并行展示） */
+export interface RepoGitState {
+  fileStatuses: GitFileStatus[];
+  branchInfo: GitBranchInfo | null;
+  commitMessage: string;
+  isGitRepo: boolean;
+  loading: boolean;
+  operating: boolean;
+  operationType: "commit" | "pull" | "push" | null;
+  generating: boolean;
+  error: string | null;
+  stashEntries: StashEntry[];
+  tagEntries: TagEntry[];
+}
+
+function makeEmptyRepoState(): RepoGitState {
+  return {
+    fileStatuses: [],
+    branchInfo: null,
+    commitMessage: "",
+    isGitRepo: false,
+    loading: false,
+    operating: false,
+    operationType: null,
+    generating: false,
+    error: null,
+    stashEntries: [],
+    tagEntries: [],
+  };
+}
+
+/** 从扁平 gitStore 状态提取 RepoGitState 快照 */
+function snapshotRepoState(s: GitState): RepoGitState {
+  return {
+    fileStatuses: s.fileStatuses,
+    branchInfo: s.branchInfo,
+    commitMessage: s.commitMessage,
+    isGitRepo: s.isGitRepo,
+    loading: s.loading,
+    operating: s.operating,
+    operationType: s.operationType,
+    generating: s.generating,
+    error: s.error,
+    stashEntries: s.stashEntries,
+    tagEntries: s.tagEntries,
+  };
+}
+
 interface GitState {
   fileStatuses: GitFileStatus[];
   branchInfo: GitBranchInfo | null;
@@ -66,6 +114,15 @@ interface GitState {
   setCommitMessage: (msg: string) => void;
   clearError: () => void;
   reset: () => void;
+
+  /* ── 多仓库支持 ── */
+  repoStates: Record<string, RepoGitState>;
+  activeRepoPath: string | null;
+  refreshRepo: (projectPath: string) => Promise<void>;
+  refreshAllRepos: (projectPaths: string[]) => Promise<void>;
+  setActiveRepo: (projectPath: string | null) => void;
+  getRepoState: (projectPath: string) => RepoGitState;
+  setRepoCommitMessage: (projectPath: string, msg: string) => void;
 }
 
 // Cancellation controller for refresh — only the latest refresh applies
@@ -89,6 +146,8 @@ export const useGitStore = create<GitState>((set, get) => ({
   generating: false,
   error: null,
   isGitRepo: false,
+  repoStates: {},
+  activeRepoPath: null,
 
   refresh: async (projectPath) => {
     // Skip polling refresh while an operation is running
@@ -124,6 +183,14 @@ export const useGitStore = create<GitState>((set, get) => ({
     if (signal.aborted) return;
 
     set({ fileStatuses: statuses, branchInfo: branch, isGitRepo, loading: false });
+
+    // 同步到 repoStates
+    set((s) => ({
+      repoStates: {
+        ...s.repoStates,
+        [projectPath]: { ...snapshotRepoState(get()), fileStatuses: statuses, branchInfo: branch, isGitRepo, loading: false },
+      },
+    }));
 
     if (!isGitRepo) return;
 
@@ -173,6 +240,16 @@ export const useGitStore = create<GitState>((set, get) => ({
 
     await Promise.all([loadDiff(), loadDiffStaged(), loadLog(), loadStash(), loadTags()]);
 
+    // 同步 stash/tags 到 repoStates
+    if (!signal.aborted) {
+      set((s) => ({
+        repoStates: {
+          ...s.repoStates,
+          [projectPath]: { ...(s.repoStates[projectPath] || makeEmptyRepoState()), stashEntries: s.stashEntries, tagEntries: s.tagEntries },
+        },
+      }));
+    }
+
     // Reload selected file diff if it still exists
     if (signal.aborted) return;
     const sel = get().selectedFile;
@@ -219,6 +296,21 @@ export const useGitStore = create<GitState>((set, get) => ({
       if (repoChanged) update.isGitRepo = isGitRepo;
       set(update);
     }
+
+    // 同步到 repoStates（无论扁平字段是否更新）
+    set((s) => {
+      const prev = s.repoStates[projectPath] || makeEmptyRepoState();
+      const repoStatusChanged = !_shallowEqualStatuses(prev.fileStatuses, statuses);
+      const repoBranchChanged = !_shallowEqualBranch(prev.branchInfo, branch);
+      const repoRepoChanged = prev.isGitRepo !== isGitRepo;
+      if (!repoStatusChanged && !repoBranchChanged && !repoRepoChanged) return {};
+      return {
+        repoStates: {
+          ...s.repoStates,
+          [projectPath]: { ...prev, fileStatuses: statuses, branchInfo: branch, isGitRepo },
+        },
+      };
+    });
   },
 
   loadLog: async (projectPath) => {
@@ -522,13 +614,17 @@ export const useGitStore = create<GitState>((set, get) => ({
   },
 
   commit: async (projectPath) => {
-    const msg = get().commitMessage.trim();
+    // 优先从 repoStates 读提交消息（workspace 模式），fallback 到扁平字段
+    const repoMsg = get().repoStates[projectPath]?.commitMessage;
+    const msg = (repoMsg ?? get().commitMessage).trim();
     if (!msg) return false;
     if (get().operating) return false;
     set({ operating: true, operationType: "commit", error: null });
     try {
       await ipc.gitCommit(projectPath, msg);
       set({ commitMessage: "", selectedFile: null, selectedFileDiff: "", operating: false, operationType: null });
+      // 清空 repoStates 中的 commitMessage
+      get().setRepoCommitMessage(projectPath, "");
       get().refresh(projectPath);
       return true;
     } catch (e: unknown) {
@@ -571,6 +667,8 @@ export const useGitStore = create<GitState>((set, get) => ({
     try {
       const msg = await ipc.generateCommitMessage(projectPath);
       set({ commitMessage: msg, generating: false });
+      // 同步到 repoStates
+      get().setRepoCommitMessage(projectPath, msg);
       return true;
     } catch (e: unknown) {
       set({ error: extractErrorMessage(e), generating: false });
@@ -599,6 +697,95 @@ export const useGitStore = create<GitState>((set, get) => ({
       generating: false,
       error: null,
       isGitRepo: false,
+      repoStates: {},
+      activeRepoPath: null,
+    });
+  },
+
+  /* ══════════════════════════════════════════
+   *  多仓库方法
+   * ══════════════════════════════════════════ */
+
+  /** 轻量刷新单个仓库的 status + branch，只写 repoStates（不影响扁平字段） */
+  refreshRepo: async (projectPath) => {
+    let statuses: GitFileStatus[] = [];
+    let branch: GitBranchInfo | null = null;
+    let isGitRepo = false;
+
+    try {
+      statuses = await ipc.gitStatus(projectPath);
+      isGitRepo = true;
+    } catch { /* not a git repo */ }
+
+    try {
+      branch = await ipc.gitBranchInfo(projectPath);
+    } catch { /* ignore */ }
+
+    // 浅比较：数据未变则跳过 set()，避免不必要的重渲染
+    set((s) => {
+      const prev = s.repoStates[projectPath];
+      if (prev) {
+        const statusSame = _shallowEqualStatuses(prev.fileStatuses, statuses);
+        const branchSame = _shallowEqualBranch(prev.branchInfo, branch);
+        const repoSame = prev.isGitRepo === isGitRepo;
+        if (statusSame && branchSame && repoSame) return {};
+      }
+      const base = prev || makeEmptyRepoState();
+      return {
+        repoStates: {
+          ...s.repoStates,
+          [projectPath]: { ...base, fileStatuses: statuses, branchInfo: branch, isGitRepo },
+        },
+      };
+    });
+  },
+
+  /** 串行刷新所有仓库的 status + branch（避免并行 IPC 风暴） */
+  refreshAllRepos: async (projectPaths) => {
+    for (const p of projectPaths) {
+      await get().refreshRepo(p);
+    }
+  },
+
+  /** 切换当前查看的仓库，同步扁平字段 */
+  setActiveRepo: (projectPath) => {
+    if (!projectPath) {
+      set({ activeRepoPath: null });
+      return;
+    }
+    const repo = get().repoStates[projectPath] || makeEmptyRepoState();
+    set({
+      activeRepoPath: projectPath,
+      fileStatuses: repo.fileStatuses,
+      branchInfo: repo.branchInfo,
+      isGitRepo: repo.isGitRepo,
+      stashEntries: repo.stashEntries,
+      tagEntries: repo.tagEntries,
+      commitMessage: repo.commitMessage,
+      operating: repo.operating,
+      operationType: repo.operationType,
+      generating: repo.generating,
+      error: repo.error,
+    });
+  },
+
+  /** 获取指定仓库的状态 */
+  getRepoState: (projectPath) => {
+    return get().repoStates[projectPath] || makeEmptyRepoState();
+  },
+
+  /** 设置指定仓库的提交消息 */
+  setRepoCommitMessage: (projectPath, msg) => {
+    set((s) => {
+      const prev = s.repoStates[projectPath] || makeEmptyRepoState();
+      return {
+        repoStates: {
+          ...s.repoStates,
+          [projectPath]: { ...prev, commitMessage: msg },
+        },
+        // 如果是当前活跃仓库，也同步扁平字段
+        ...(s.activeRepoPath === projectPath ? { commitMessage: msg } : {}),
+      };
     });
   },
 }));
@@ -632,6 +819,10 @@ async function _refreshAfterFileOp(
       ipc.gitDiffStaged(projectPath),
     ]);
     set({ fileStatuses: statuses, diffText: diff, diffStagedText: diffStaged });
+
+    // 同步 status 到 repoStates
+    const prev = get().repoStates[projectPath] || makeEmptyRepoState();
+    set({ repoStates: { ...get().repoStates, [projectPath]: { ...prev, fileStatuses: statuses } } } as Partial<GitState>);
 
     const sel = get().selectedFile;
     if (sel) {

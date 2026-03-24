@@ -47,6 +47,12 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             // DB commands
+            commands::db_commands::create_workspace,
+            commands::db_commands::list_workspaces,
+            commands::db_commands::get_workspace,
+            commands::db_commands::update_workspace,
+            commands::db_commands::delete_workspace,
+            commands::db_commands::update_workspace_timestamp,
             commands::db_commands::create_project,
             commands::db_commands::list_projects,
             commands::db_commands::get_project,

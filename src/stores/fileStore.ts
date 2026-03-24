@@ -2,33 +2,24 @@ import { create } from "zustand";
 import type { DirEntry } from "../lib/types";
 import * as ipc from "../ipc/commands";
 
-interface FileState {
-  tree: DirEntry[];
-  expandedPaths: Set<string>;
-  loadingPaths: Set<string>; // directories currently being loaded
-  loading: boolean;
-  currentProjectPath: string | null;
-
-  // File viewer/editor state
-  openFilePath: string | null;
-  openFileContent: string | null;
-  openFileLine: number | null; // line to scroll to after opening
-  openFileError: string | null; // 文件加载失败的错误信息
-  isDirty: boolean;
-  saving: boolean;
-
-  loadTree: (projectPath: string) => Promise<void>;
-  toggleExpand: (path: string) => void;
-  refreshExpanded: (projectPath: string) => Promise<void>;
-  openFile: (filePath: string, line?: number) => Promise<void>;
-  closeFile: () => void;
-  markDirty: (dirty: boolean) => void;
-  saveFile: (content: string) => Promise<boolean>;
-  refreshParent: (parentPath: string) => Promise<void>;
-  reset: () => void;
+/* ── 辅助：找到绝对路径所属的项目根 ── */
+function findRootPath(trees: Record<string, DirEntry[]>, path: string): string | undefined {
+  return Object.keys(trees).find((rp) => path === rp || path.startsWith(rp + "/"));
 }
 
-/** Recursively replace children of the node at `targetPath` in the tree. */
+/* ── 辅助：在条目树中递归查找节点 ── */
+function findNode(entries: DirEntry[], path: string): DirEntry | null {
+  for (const e of entries) {
+    if (e.path === path) return e;
+    if (e.children) {
+      const found = findNode(e.children, path);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+/** 递归替换 targetPath 节点的 children */
 function updateChildren(
   entries: DirEntry[],
   targetPath: string,
@@ -45,12 +36,50 @@ function updateChildren(
   });
 }
 
+/* ── 辅助：更新 trees 中某棵树的条目 ── */
+function patchTree(
+  trees: Record<string, DirEntry[]>,
+  rootPath: string,
+  updater: (entries: DirEntry[]) => DirEntry[],
+): Record<string, DirEntry[]> {
+  const entries = trees[rootPath];
+  if (!entries) return trees;
+  return { ...trees, [rootPath]: updater(entries) };
+}
+
+interface FileState {
+  trees: Record<string, DirEntry[]>; // projectPath → 根级条目
+  expandedPaths: Set<string>;
+  loadingPaths: Set<string>;
+  loading: boolean;
+  currentProjectPaths: string[]; // 竞态保护
+
+  // 文件编辑器状态
+  openFilePath: string | null;
+  openFileContent: string | null;
+  openFileLine: number | null;
+  openFileError: string | null;
+  isDirty: boolean;
+  saving: boolean;
+
+  loadTree: (projectPath: string) => Promise<void>;
+  loadTrees: (projectPaths: string[]) => Promise<void>;
+  toggleExpand: (path: string) => void;
+  refreshExpanded: (projectPath?: string) => Promise<void>;
+  openFile: (filePath: string, line?: number) => Promise<void>;
+  closeFile: () => void;
+  markDirty: (dirty: boolean) => void;
+  saveFile: (content: string) => Promise<boolean>;
+  refreshParent: (parentPath: string) => Promise<void>;
+  reset: () => void;
+}
+
 export const useFileStore = create<FileState>((set, get) => ({
-  tree: [],
+  trees: {},
   expandedPaths: new Set<string>(),
   loadingPaths: new Set<string>(),
   loading: false,
-  currentProjectPath: null,
+  currentProjectPaths: [],
   openFilePath: null,
   openFileContent: null,
   openFileLine: null,
@@ -58,55 +87,80 @@ export const useFileStore = create<FileState>((set, get) => ({
   isDirty: false,
   saving: false,
 
+  /* ── 加载单棵项目树 ── */
   loadTree: async (projectPath: string) => {
-    set({ loading: true, currentProjectPath: projectPath });
+    set((s) => ({ loading: true, currentProjectPaths: [projectPath], trees: { ...s.trees } }));
     try {
-      // Only load 1 level initially — children are loaded lazily on expand
-      const tree = await ipc.readDirectoryTree(projectPath, 1);
-      if (get().currentProjectPath !== projectPath) return;
-      set({ tree, loading: false });
+      const entries = await ipc.readDirectoryTree(projectPath, 1);
+      // 竞态保护
+      if (!get().currentProjectPaths.includes(projectPath)) return;
+      set((s) => ({ trees: { ...s.trees, [projectPath]: entries }, loading: false }));
     } catch {
-      if (get().currentProjectPath !== projectPath) return;
-      set({ tree: [], loading: false });
+      if (!get().currentProjectPaths.includes(projectPath)) return;
+      set((s) => ({ trees: { ...s.trees, [projectPath]: [] }, loading: false }));
     }
   },
 
+  /* ── 并行加载多棵项目树 ── */
+  loadTrees: async (projectPaths: string[]) => {
+    if (projectPaths.length === 0) {
+      set({ trees: {}, loading: false, currentProjectPaths: [] });
+      return;
+    }
+    set({ loading: true, currentProjectPaths: projectPaths });
+    try {
+      const results = await Promise.all(
+        projectPaths.map((p) => ipc.readDirectoryTree(p, 1).catch(() => [] as DirEntry[])),
+      );
+      // 竞态保护：检查路径列表是否已变
+      const cur = get().currentProjectPaths;
+      if (cur.length !== projectPaths.length || cur.some((p, i) => p !== projectPaths[i])) return;
+      const trees: Record<string, DirEntry[]> = {};
+      projectPaths.forEach((p, i) => { trees[p] = results[i]; });
+      set({ trees, loading: false });
+    } catch {
+      set({ loading: false });
+    }
+  },
+
+  /* ── 展开/折叠目录 ── */
   toggleExpand: (path: string) => {
-    const { expandedPaths, tree, loadingPaths, currentProjectPath } = get();
+    const { expandedPaths, trees, loadingPaths } = get();
     const expanded = new Set(expandedPaths);
 
     if (expanded.has(path)) {
-      // Collapse
       expanded.delete(path);
       set({ expandedPaths: expanded });
       return;
     }
 
-    // Expand
     expanded.add(path);
     set({ expandedPaths: expanded });
 
-    // Check if children are already loaded (non-empty array means loaded)
-    const node = findNode(tree, path);
-    if (node && node.children && node.children.length > 0) {
-      // Already loaded, nothing to do
-      return;
-    }
+    // 找到该路径所属的项目根
+    const rootPath = findRootPath(trees, path);
+    if (!rootPath) return;
 
-    // Need to lazy-load children
-    if (loadingPaths.has(path)) return; // already loading
-    if (!currentProjectPath) return;
+    // 检查 children 是否已加载
+    const node = findNode(trees[rootPath], path);
+    if (node && node.children && node.children.length > 0) return;
 
+    // 懒加载 children
+    if (loadingPaths.has(path)) return;
     const newLoading = new Set(loadingPaths);
     newLoading.add(path);
     set({ loadingPaths: newLoading });
 
     ipc.readDirectoryChildren(path).then((children) => {
-      const { tree: currentTree, loadingPaths: curLoading } = get();
-      const updatedTree = updateChildren(currentTree, path, children);
+      const { trees: curTrees, loadingPaths: curLoading } = get();
+      const rp = findRootPath(curTrees, path);
+      if (!rp) return;
+      const updatedTrees = patchTree(curTrees, rp, (entries) =>
+        updateChildren(entries, path, children),
+      );
       const doneLoading = new Set(curLoading);
       doneLoading.delete(path);
-      set({ tree: updatedTree, loadingPaths: doneLoading });
+      set({ trees: updatedTrees, loadingPaths: doneLoading });
     }).catch(() => {
       const { loadingPaths: curLoading } = get();
       const doneLoading = new Set(curLoading);
@@ -115,33 +169,38 @@ export const useFileStore = create<FileState>((set, get) => ({
     });
   },
 
-  refreshExpanded: async (projectPath: string) => {
-    const { expandedPaths } = get();
-    try {
-      // Reload root
-      const tree = await ipc.readDirectoryTree(projectPath, 1);
-      if (get().currentProjectPath !== projectPath) return;
-      let updatedTree = tree;
+  /* ── 刷新已展开的目录（可选指定项目，否则刷新所有） ── */
+  refreshExpanded: async (projectPath?: string) => {
+    const { expandedPaths, trees } = get();
+    const rootPaths = projectPath ? [projectPath] : Object.keys(trees);
 
-      // Refresh all expanded directories
-      for (const dirPath of expandedPaths) {
-        if (dirPath === projectPath) continue;
-        try {
-          const children = await ipc.readDirectoryChildren(dirPath);
-          updatedTree = updateChildren(updatedTree, dirPath, children);
-        } catch {
-          // Directory may have been deleted — remove from expanded
-          const newExpanded = new Set(get().expandedPaths);
-          newExpanded.delete(dirPath);
-          set({ expandedPaths: newExpanded });
+    for (const rp of rootPaths) {
+      try {
+        const rootEntries = await ipc.readDirectoryTree(rp, 1);
+        let updatedEntries = rootEntries;
+
+        // 刷新该项目下所有已展开的子目录
+        for (const dirPath of expandedPaths) {
+          if (dirPath === rp) continue;
+          if (!dirPath.startsWith(rp + "/")) continue;
+          try {
+            const children = await ipc.readDirectoryChildren(dirPath);
+            updatedEntries = updateChildren(updatedEntries, dirPath, children);
+          } catch {
+            const newExpanded = new Set(get().expandedPaths);
+            newExpanded.delete(dirPath);
+            set({ expandedPaths: newExpanded });
+          }
         }
+
+        set((s) => ({ trees: { ...s.trees, [rp]: updatedEntries } }));
+      } catch {
+        // ignore
       }
-      set({ tree: updatedTree });
-    } catch {
-      // ignore
     }
   },
 
+  /* ── 打开文件 ── */
   openFile: async (filePath: string, line?: number) => {
     set({ openFilePath: filePath, openFileContent: null, openFileLine: line ?? null, openFileError: null, isDirty: false });
     try {
@@ -179,29 +238,37 @@ export const useFileStore = create<FileState>((set, get) => ({
     }
   },
 
+  /* ── 刷新父目录 ── */
   refreshParent: async (parentPath: string) => {
     try {
       const children = await ipc.readDirectoryChildren(parentPath);
-      const { tree: currentTree } = get();
-      // Check if parentPath is the root project path
-      if (parentPath === get().currentProjectPath) {
-        set({ tree: children });
+      const { trees } = get();
+      const rootPath = findRootPath(trees, parentPath);
+      if (!rootPath) return;
+
+      if (parentPath === rootPath) {
+        // 刷新的是项目根
+        set((s) => ({ trees: { ...s.trees, [rootPath]: children } }));
       } else {
-        const updatedTree = updateChildren(currentTree, parentPath, children);
-        set({ tree: updatedTree });
+        set((s) => ({
+          trees: patchTree(s.trees, rootPath, (entries) =>
+            updateChildren(entries, parentPath, children),
+          ),
+        }));
       }
     } catch {
       // ignore
     }
   },
 
+  /* ── 重置 ── */
   reset: () => {
     set({
-      tree: [],
+      trees: {},
       expandedPaths: new Set<string>(),
       loadingPaths: new Set<string>(),
       loading: false,
-      currentProjectPath: null,
+      currentProjectPaths: [],
       openFilePath: null,
       openFileContent: null,
       openFileLine: null,
@@ -211,14 +278,3 @@ export const useFileStore = create<FileState>((set, get) => ({
     });
   },
 }));
-
-function findNode(entries: DirEntry[], path: string): DirEntry | null {
-  for (const e of entries) {
-    if (e.path === path) return e;
-    if (e.children) {
-      const found = findNode(e.children, path);
-      if (found) return found;
-    }
-  }
-  return null;
-}

@@ -50,6 +50,44 @@ pub fn delete_project(state: State<AppState>, id: String) -> AppResult<()> {
     db::projects::delete_project(&conn, &id)
 }
 
+// --- Workspaces ---
+
+#[tauri::command]
+pub fn create_workspace(state: State<AppState>, name: String) -> AppResult<db::workspaces::Workspace> {
+    let conn = lock_db(&state)?;
+    db::workspaces::create_workspace(&conn, &name)
+}
+
+#[tauri::command]
+pub fn list_workspaces(state: State<AppState>) -> AppResult<Vec<db::workspaces::Workspace>> {
+    let conn = lock_db(&state)?;
+    db::workspaces::list_workspaces(&conn)
+}
+
+#[tauri::command]
+pub fn get_workspace(state: State<AppState>, id: String) -> AppResult<Option<db::workspaces::Workspace>> {
+    let conn = lock_db(&state)?;
+    db::workspaces::get_workspace(&conn, &id)
+}
+
+#[tauri::command]
+pub fn update_workspace(state: State<AppState>, id: String, name: String, project_ids_json: String) -> AppResult<()> {
+    let conn = lock_db(&state)?;
+    db::workspaces::update_workspace(&conn, &id, &name, &project_ids_json)
+}
+
+#[tauri::command]
+pub fn delete_workspace(state: State<AppState>, id: String) -> AppResult<()> {
+    let conn = lock_db(&state)?;
+    db::workspaces::delete_workspace(&conn, &id)
+}
+
+#[tauri::command]
+pub fn update_workspace_timestamp(state: State<AppState>, id: String) -> AppResult<()> {
+    let conn = lock_db(&state)?;
+    db::workspaces::update_workspace_timestamp(&conn, &id)
+}
+
 // --- Sessions ---
 
 #[tauri::command]

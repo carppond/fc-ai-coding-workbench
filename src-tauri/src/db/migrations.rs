@@ -92,6 +92,14 @@ pub fn run_migrations(conn: &mut Connection) -> AppResult<()> {
             INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.rowid, old.content);
             INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content);
         END;
+
+        CREATE TABLE IF NOT EXISTS workspaces (
+            id               TEXT PRIMARY KEY,
+            name             TEXT NOT NULL,
+            project_ids_json TEXT NOT NULL DEFAULT '[]',
+            created_at       INTEGER NOT NULL,
+            updated_at       INTEGER NOT NULL
+        );
         ",
     )?;
     Ok(())

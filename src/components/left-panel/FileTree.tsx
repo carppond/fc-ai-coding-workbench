@@ -9,18 +9,36 @@ import type { DirEntry } from "../../lib/types";
 import type { GitFileStatus } from "../../lib/types";
 
 export function FileTree() {
-  const { activeProject } = useProjectStore();
-  const { tree, loading, loadTree, reset } = useFileStore();
+  const activeProject = useProjectStore((s) => s.activeProject);
+  const selectedIds = useProjectStore((s) => s.selectedProjectIds);
+  const projects = useProjectStore((s) => s.projects);
+  const trees = useFileStore((s) => s.trees);
+  const loading = useFileStore((s) => s.loading);
+  const loadTrees = useFileStore((s) => s.loadTrees);
+  const loadTree = useFileStore((s) => s.loadTree);
   const fileStatuses = useGitStore((s) => s.fileStatuses);
   const { t } = useI18n();
 
+  // 勾选的项目列表
+  const displayProjects = useMemo(
+    () => projects.filter((p) => selectedIds.has(p.id)),
+    [projects, selectedIds],
+  );
+
+  // 稳定的 key，防止引用变化导致无限 re-render
+  const displayKey = useMemo(
+    () => displayProjects.map((p) => p.id).join(","),
+    [displayProjects],
+  );
+
   useEffect(() => {
-    if (activeProject) {
-      loadTree(activeProject.path);
+    if (displayProjects.length === 0) return;
+    if (displayProjects.length === 1) {
+      loadTree(displayProjects[0].path);
     } else {
-      reset();
+      loadTrees(displayProjects.map((p) => p.path));
     }
-  }, [activeProject?.id]);
+  }, [displayKey]);
 
   // 构建 git 状态查找 Map（绝对路径 → GitFileStatus）和脏目录 Set
   const { gitStatusMap, gitDirtyDirs } = useMemo(() => {
@@ -32,14 +50,12 @@ export function FileTree() {
     for (const status of fileStatuses) {
       const absPath = projectPath + "/" + status.path;
       map.set(absPath, status);
-      // 向上递推所有父目录
       let parent = absPath;
       while (true) {
         const idx = parent.lastIndexOf("/");
         if (idx <= 0) break;
         parent = parent.substring(0, idx);
         if (parent.length <= projectPath.length) {
-          // 项目根目录也加入
           dirs.add(parent);
           break;
         }
@@ -49,18 +65,7 @@ export function FileTree() {
     return { gitStatusMap: map, gitDirtyDirs: dirs };
   }, [activeProject, fileStatuses]);
 
-  // Wrap tree data in a root node representing the project directory
-  const rootEntry = useMemo<DirEntry | null>(() => {
-    if (!activeProject) return null;
-    return {
-      name: activeProject.name,
-      path: activeProject.path,
-      is_dir: true,
-      children: tree,
-    };
-  }, [activeProject, tree]);
-
-  if (!activeProject) {
+  if (displayProjects.length === 0) {
     return (
       <div className="empty-state">
         <FolderOpen size={32} className="empty-state__icon" />
@@ -70,7 +75,7 @@ export function FileTree() {
     );
   }
 
-  if (loading && tree.length === 0) {
+  if (loading && Object.keys(trees).length === 0) {
     return (
       <div className="empty-state">
         <Loader size={20} className="spin" />
@@ -79,18 +84,31 @@ export function FileTree() {
     );
   }
 
-  if (!rootEntry) return null;
+  const isMulti = displayProjects.length > 1;
 
   return (
     <div className="file-tree">
       <div className="file-tree__list">
-        <FileTreeItem
-          entry={rootEntry}
-          depth={0}
-          defaultExpanded
-          gitStatusMap={gitStatusMap}
-          gitDirtyDirs={gitDirtyDirs}
-        />
+        {displayProjects.map((proj) => {
+          const entries = trees[proj.path] || [];
+          const rootEntry: DirEntry = {
+            name: proj.name,
+            path: proj.path,
+            is_dir: true,
+            children: entries,
+          };
+          return (
+            <FileTreeItem
+              key={proj.path}
+              entry={rootEntry}
+              depth={0}
+              defaultExpanded={!isMulti}
+              isProjectRoot={isMulti}
+              gitStatusMap={gitStatusMap}
+              gitDirtyDirs={gitDirtyDirs}
+            />
+          );
+        })}
       </div>
     </div>
   );

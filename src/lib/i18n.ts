@@ -135,6 +135,10 @@ const translations: Record<Locale, Record<string, string>> = {
     "git.branchDeleted": "分支已删除",
     "git.branchSwitched": "已切换到分支",
     "git.searchBranches": "搜索分支...",
+    "git.notGitRepo": "非 Git 仓库",
+
+    // Project multi-select
+    "project.deselect": "取消选中",
 
     // TopBar - Theme
     "topbar.switchTheme": "切换主题",
@@ -289,6 +293,10 @@ const translations: Record<Locale, Record<string, string>> = {
     "fontSize.editor": "编辑器",
     "fontSize.terminal": "终端",
     "fontSize.chat": "聊天",
+    "terminal.settings": "终端设置",
+    "terminal.scrollback": "回滚行数",
+    "terminal.lines": "行",
+    "terminal.lineHeight": "行高",
 
     // Shortcuts Reference
     "shortcuts.title": "快捷键",
@@ -466,6 +474,10 @@ const translations: Record<Locale, Record<string, string>> = {
     "git.branchDeleted": "Branch deleted",
     "git.branchSwitched": "Switched to branch",
     "git.searchBranches": "Search branches...",
+    "git.notGitRepo": "Not a Git repo",
+
+    // Project multi-select
+    "project.deselect": "Deselect",
 
     // TopBar - Theme
     "topbar.switchTheme": "Switch Theme",
@@ -620,6 +632,10 @@ const translations: Record<Locale, Record<string, string>> = {
     "fontSize.editor": "Editor",
     "fontSize.terminal": "Terminal",
     "fontSize.chat": "Chat",
+    "terminal.settings": "Terminal",
+    "terminal.scrollback": "Scrollback",
+    "terminal.lines": "lines",
+    "terminal.lineHeight": "Line Height",
 
     // Shortcuts Reference
     "shortcuts.title": "Keyboard Shortcuts",

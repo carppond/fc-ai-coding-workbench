@@ -420,6 +420,8 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
   const outputBufferRef = useRef<string[]>([]);
   const theme = useSettingsStore((s) => s.theme);
   const terminalFontSize = useSettingsStore((s) => s.terminalFontSize);
+  const terminalScrollback = useSettingsStore((s) => s.terminalScrollback);
+  const terminalLineHeight = useSettingsStore((s) => s.terminalLineHeight);
 
   // Inline search bar state
   const [searchVisible, setSearchVisible] = useState(false);
@@ -468,13 +470,26 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
     }
   }, [theme]);
 
-  // 动态更新终端字体大小
+  // 动态更新终端字体大小、行高、回滚行数
   useEffect(() => {
     if (xtermRef.current && fitAddonRef.current) {
       xtermRef.current.options.fontSize = terminalFontSize;
       try { fitAddonRef.current.fit(); } catch { /* 容器不可见 */ }
     }
   }, [terminalFontSize]);
+
+  useEffect(() => {
+    if (xtermRef.current && fitAddonRef.current) {
+      xtermRef.current.options.lineHeight = terminalLineHeight;
+      try { fitAddonRef.current.fit(); } catch { /* 容器不可见 */ }
+    }
+  }, [terminalLineHeight]);
+
+  useEffect(() => {
+    if (xtermRef.current) {
+      xtermRef.current.options.scrollback = terminalScrollback;
+    }
+  }, [terminalScrollback]);
 
   // Re-fit when visibility changes (tab switch) and flush buffered output
   useEffect(() => {
@@ -527,9 +542,9 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
       fontFamily: '"JetBrains Mono", "Symbols Nerd Font Mono", "SF Mono", "Fira Code", "Cascadia Code", Menlo, Consolas, monospace, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji"',
       fontWeight: "400",
       fontWeightBold: "700",
-      lineHeight: 1.35,
+      lineHeight: useSettingsStore.getState().terminalLineHeight,
       letterSpacing: 0,
-      scrollback: 5000,
+      scrollback: useSettingsStore.getState().terminalScrollback,
       smoothScrollDuration: 0,
       theme: TERMINAL_THEMES[currentTheme],
       allowProposedApi: true,

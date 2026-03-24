@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, memo } from "react";
 import { ChevronRight, ChevronDown, Folder, FileText, Loader, FileCode, FileJson, Image, Terminal, Database, Lock, Package, Settings, BookOpen } from "lucide-react";
 import type { DirEntry, GitFileStatus } from "../../lib/types";
 import { useFileStore } from "../../stores/fileStore";
+import { useProjectStore } from "../../stores/projectStore";
 import { useI18n } from "../../lib/i18n";
 import { useConfirm } from "../common/ConfirmDialog";
 import * as ipc from "../../ipc/commands";
@@ -10,6 +11,7 @@ interface FileTreeItemProps {
   entry: DirEntry;
   depth: number;
   defaultExpanded?: boolean;
+  isProjectRoot?: boolean;
   gitStatusMap?: Map<string, GitFileStatus>;
   gitDirtyDirs?: Set<string>;
 }
@@ -95,7 +97,7 @@ function statusClass(status: string): string {
   }
 }
 
-export const FileTreeItem = memo(function FileTreeItem({ entry, depth, defaultExpanded, gitStatusMap, gitDirtyDirs }: FileTreeItemProps) {
+export const FileTreeItem = memo(function FileTreeItem({ entry, depth, defaultExpanded, isProjectRoot, gitStatusMap, gitDirtyDirs }: FileTreeItemProps) {
   const expandedPaths = useFileStore((s) => s.expandedPaths);
   const toggleExpand = useFileStore((s) => s.toggleExpand);
   const loadingPaths = useFileStore((s) => s.loadingPaths);
@@ -212,6 +214,15 @@ export const FileTreeItem = memo(function FileTreeItem({ entry, depth, defaultEx
     }
   };
 
+  // 从选中列表中取消选中项目
+  const handleDeselectProject = () => {
+    setContextMenu(null);
+    const { toggleProjectSelected, projects } = useProjectStore.getState();
+    const project = projects.find((p) => p.path === entry.path);
+    if (!project) return;
+    toggleProjectSelected(project.id);
+  };
+
   const commitEdit = async () => {
     const value = editValue.trim();
     if (!value) {
@@ -290,7 +301,7 @@ export const FileTreeItem = memo(function FileTreeItem({ entry, depth, defaultEx
               : "file-tree-item__name";
           return (
             <>
-              <span className={nameClass}>{entry.name}</span>
+              <span className={nameClass} style={isProjectRoot ? { fontWeight: 600 } : undefined}>{entry.name}</span>
               {fileStatus && (
                 <span className={`file-tree-item__git-status file-tree-item__name--${statusClass(fileStatus.status)}`}>
                   {statusLetter(fileStatus.status)}
@@ -334,26 +345,40 @@ export const FileTreeItem = memo(function FileTreeItem({ entry, depth, defaultEx
           style={{ top: contextMenu.y, left: contextMenu.x }}
           onClick={(e) => e.stopPropagation()}
         >
-          {isDir && (
+          {isProjectRoot ? (
             <>
-              <div className="context-menu__item" onClick={startNewFile}>
-                {t("fileTree.newFile")}
+              <div className="context-menu__item" onClick={handleShowInFolder}>
+                {t("fileTree.showInFolder")}
               </div>
-              <div className="context-menu__item" onClick={startNewFolder}>
-                {t("fileTree.newFolder")}
+              <div className="context-menu__separator" />
+              <div className="context-menu__item" onClick={handleDeselectProject}>
+                {t("project.deselect")}
+              </div>
+            </>
+          ) : (
+            <>
+              {isDir && (
+                <>
+                  <div className="context-menu__item" onClick={startNewFile}>
+                    {t("fileTree.newFile")}
+                  </div>
+                  <div className="context-menu__item" onClick={startNewFolder}>
+                    {t("fileTree.newFolder")}
+                  </div>
+                </>
+              )}
+              <div className="context-menu__item" onClick={startRename}>
+                {t("fileTree.rename")}
+              </div>
+              <div className="context-menu__item" onClick={handleShowInFolder}>
+                {t("fileTree.showInFolder")}
+              </div>
+              <div className="context-menu__separator" />
+              <div className="context-menu__item context-menu__item--danger" onClick={handleDelete}>
+                {t("fileTree.delete")}
               </div>
             </>
           )}
-          <div className="context-menu__item" onClick={startRename}>
-            {t("fileTree.rename")}
-          </div>
-          <div className="context-menu__item" onClick={handleShowInFolder}>
-            {t("fileTree.showInFolder")}
-          </div>
-          <div className="context-menu__separator" />
-          <div className="context-menu__item context-menu__item--danger" onClick={handleDelete}>
-            {t("fileTree.delete")}
-          </div>
         </div>
       )}
     </>

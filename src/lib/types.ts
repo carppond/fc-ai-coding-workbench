@@ -1,3 +1,11 @@
+export interface Workspace {
+  id: string;
+  name: string;
+  project_ids_json: string; // JSON 字符串，解析后 string[]
+  created_at: number;
+  updated_at: number;
+}
+
 export interface Project {
   id: string;
   path: string;

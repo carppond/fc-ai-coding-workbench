@@ -199,6 +199,50 @@ function FontSizeSettings() {
   );
 }
 
+function TerminalSettings() {
+  const { t } = useI18n();
+  const terminalScrollback = useSettingsStore((s) => s.terminalScrollback);
+  const terminalLineHeight = useSettingsStore((s) => s.terminalLineHeight);
+  const setTerminalScrollback = useSettingsStore((s) => s.setTerminalScrollback);
+  const setTerminalLineHeight = useSettingsStore((s) => s.setTerminalLineHeight);
+
+  const scrollbackOptions = [1000, 3000, 5000, 10000, 20000, 50000, 100000];
+
+  return (
+    <div className="font-settings">
+      <div className="font-settings__row">
+        <label className="font-settings__label">{t("terminal.scrollback")}</label>
+        <div className="font-settings__control">
+          <select
+            className="font-settings__select"
+            value={terminalScrollback}
+            onChange={(e) => setTerminalScrollback(Number(e.target.value))}
+          >
+            {scrollbackOptions.map((v) => (
+              <option key={v} value={v}>{v.toLocaleString()} {t("terminal.lines")}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div className="font-settings__row">
+        <label className="font-settings__label">{t("terminal.lineHeight")}</label>
+        <div className="font-settings__control">
+          <input
+            type="range"
+            min={1.0}
+            max={2.0}
+            step={0.05}
+            value={terminalLineHeight}
+            onChange={(e) => setTerminalLineHeight(Number(e.target.value))}
+            className="font-settings__slider"
+          />
+          <span className="font-settings__value">{terminalLineHeight.toFixed(2)}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ShortcutsReference() {
   const { t } = useI18n();
   const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent);
@@ -375,6 +419,12 @@ export function TopBar() {
                   {t("fontSize.title")}
                 </div>
                 <FontSizeSettings />
+              </div>
+              <div className="settings-dialog__section">
+                <div className="settings-dialog__section-title">
+                  {t("terminal.settings")}
+                </div>
+                <TerminalSettings />
               </div>
               <div className="settings-dialog__section">
                 <div className="settings-dialog__section-title">

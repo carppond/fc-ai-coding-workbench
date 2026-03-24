@@ -6,31 +6,67 @@ import { open } from "@tauri-apps/plugin-dialog";
 interface ProjectState {
   projects: Project[];
   activeProject: Project | null;
+  selectedProjectIds: Set<string>; // 勾选的项目，同时显示在文件树和 Git 面板
   loading: boolean;
+
   loadProjects: () => Promise<void>;
   openProject: () => Promise<void>;
   setActiveProject: (project: Project) => Promise<void>;
   renameProject: (id: string, name: string) => Promise<void>;
   deleteProject: (id: string) => Promise<void>;
+  toggleProjectSelected: (id: string) => void;
+}
+
+/* ── 持久化 selectedProjectIds ── */
+async function saveSelectedIds(ids: Set<string>) {
+  try {
+    await ipc.setSetting("selected_project_ids", [...ids]);
+  } catch { /* ignore */ }
+}
+
+async function loadSelectedIds(): Promise<string[]> {
+  try {
+    const val = await ipc.getSetting("selected_project_ids");
+    if (Array.isArray(val)) return val as string[];
+  } catch { /* ignore */ }
+  return [];
 }
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
   projects: [],
   activeProject: null,
+  selectedProjectIds: new Set<string>(),
   loading: false,
 
   loadProjects: async () => {
     set({ loading: true });
     try {
-      const projects = await ipc.listProjects();
-      // Auto-restore the most recently opened project
+      const [projects, savedIds] = await Promise.all([
+        ipc.listProjects(),
+        loadSelectedIds(),
+      ]);
+
+      // 过滤掉已删除的项目 ID
+      const validIds = savedIds.filter((id) => projects.some((p) => p.id === id));
+      const selectedProjectIds = new Set<string>(validIds);
+
+      // 恢复 activeProject：MRU
       let active: Project | null = null;
       if (projects.length > 0) {
         active = projects.reduce((a, b) =>
           a.last_opened > b.last_opened ? a : b
         );
+        // 确保 activeProject 在 selectedProjectIds 中
+        if (active && selectedProjectIds.size > 0 && !selectedProjectIds.has(active.id)) {
+          active = projects.find((p) => selectedProjectIds.has(p.id)) || active;
+        }
+        // 如果没有任何 selected，默认选中 active
+        if (selectedProjectIds.size === 0 && active) {
+          selectedProjectIds.add(active.id);
+        }
       }
-      set({ projects, activeProject: active, loading: false });
+
+      set({ projects, activeProject: active, selectedProjectIds, loading: false });
     } catch {
       set({ loading: false });
     }
@@ -44,15 +80,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const name = path.split("/").pop() || path.split("\\").pop() || path;
 
     try {
-      // Check if project already exists
-      const existing = get().projects.find((p) => p.path === path);
-      if (existing) {
-        await get().setActiveProject(existing);
-        return;
+      let project = get().projects.find((p) => p.path === path);
+      if (project) {
+        await get().setActiveProject(project);
+      } else {
+        project = await ipc.createProject(path, name);
+        set((s) => ({ projects: [project!, ...s.projects], activeProject: project! }));
       }
 
-      const project = await ipc.createProject(path, name);
-      set((s) => ({ projects: [project, ...s.projects], activeProject: project }));
+      // 自动勾选新打开的项目
+      if (project) {
+        const ids = new Set(get().selectedProjectIds);
+        if (!ids.has(project.id)) {
+          ids.add(project.id);
+          set({ selectedProjectIds: ids });
+          saveSelectedIds(ids);
+        }
+      }
     } catch (e) {
       console.error("Failed to open project:", e);
     }
@@ -76,9 +120,35 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   deleteProject: async (id) => {
     await ipc.deleteProject(id);
+    const ids = new Set(get().selectedProjectIds);
+    ids.delete(id);
     set((s) => ({
       projects: s.projects.filter((p) => p.id !== id),
       activeProject: s.activeProject?.id === id ? null : s.activeProject,
+      selectedProjectIds: ids,
     }));
+    saveSelectedIds(ids);
+  },
+
+  toggleProjectSelected: (id) => {
+    const ids = new Set(get().selectedProjectIds);
+    if (ids.has(id)) {
+      // 至少保留一个勾选
+      if (ids.size <= 1) return;
+      ids.delete(id);
+      // 如果取消的是 activeProject，切换到其他勾选项目
+      if (get().activeProject?.id === id) {
+        const nextId = [...ids][0];
+        const next = get().projects.find((p) => p.id === nextId);
+        if (next) {
+          set({ activeProject: next });
+          ipc.updateProjectLastOpened(next.id);
+        }
+      }
+    } else {
+      ids.add(id);
+    }
+    set({ selectedProjectIds: ids });
+    saveSelectedIds(ids);
   },
 }));

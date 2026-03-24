@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { FolderOpen, Pencil, Plus, RefreshCw, Trash2, Check, X } from "lucide-react";
+import { FolderOpen, Pencil, Plus, RefreshCw, Trash2, Check, X, Square, CheckSquare } from "lucide-react";
 import { useProjectStore } from "../../stores/projectStore";
 import { useFileStore } from "../../stores/fileStore";
 import { useI18n } from "../../lib/i18n";
@@ -9,9 +9,14 @@ import { FileSearchPanel } from "./FileSearchPanel";
 
 export function LeftPanel() {
   const [activeTab, setActiveTab] = useState<"files" | "search">("files");
-  const { projects, activeProject, setActiveProject, openProject, renameProject, deleteProject } =
-    useProjectStore();
-  const loadTree = useFileStore((s) => s.loadTree);
+  const projects = useProjectStore((s) => s.projects);
+  const activeProject = useProjectStore((s) => s.activeProject);
+  const selectedIds = useProjectStore((s) => s.selectedProjectIds);
+  const setActiveProject = useProjectStore((s) => s.setActiveProject);
+  const openProject = useProjectStore((s) => s.openProject);
+  const renameProject = useProjectStore((s) => s.renameProject);
+  const deleteProject = useProjectStore((s) => s.deleteProject);
+  const toggleProjectSelected = useProjectStore((s) => s.toggleProjectSelected);
   const refreshExpanded = useFileStore((s) => s.refreshExpanded);
   const { t } = useI18n();
   const { confirm } = useConfirm();
@@ -37,8 +42,13 @@ export function LeftPanel() {
     const now = Date.now();
     if (now - lastRefreshRef.current < 3000) return;
     lastRefreshRef.current = now;
-    refreshExpanded(activeProject.path);
-  }, [activeProject, refreshExpanded]);
+    // 多项目选中时刷新所有树，否则刷新 activeProject
+    if (selectedIds.size > 1) {
+      refreshExpanded();
+    } else {
+      refreshExpanded(activeProject.path);
+    }
+  }, [activeProject, selectedIds.size, refreshExpanded]);
 
   useEffect(() => {
     window.addEventListener("focus", handleFocusRefresh);
@@ -105,7 +115,7 @@ export function LeftPanel() {
           {activeTab === "files" && activeProject && (
             <button
               className="btn btn--ghost btn--sm"
-              onClick={() => loadTree(activeProject.path)}
+              onClick={handleFocusRefresh}
               title={t("fileTree.refresh")}
             >
               <RefreshCw size={14} />
@@ -121,12 +131,13 @@ export function LeftPanel() {
         </div>
       </div>
 
-      {/* Project list */}
+      {/* Project list with checkbox */}
       {sortedProjects.length > 0 && (
         <div className="project-list">
           {sortedProjects.map((proj) => {
             const isActive = proj.id === activeProject?.id;
             const isRenaming = renamingId === proj.id;
+            const isChecked = selectedIds.has(proj.id);
 
             return (
               <div
@@ -137,7 +148,20 @@ export function LeftPanel() {
                 }}
                 title={proj.path}
               >
-                <FolderOpen size={13} />
+                {/* Checkbox — 多项目时显示，或有 2+ 项目时显示 */}
+                {projects.length > 1 && (
+                  <span
+                    className="project-item__check"
+                    onClick={(e) => { e.stopPropagation(); toggleProjectSelected(proj.id); }}
+                  >
+                    {isChecked
+                      ? <CheckSquare size={13} color="var(--accent)" />
+                      : <Square size={13} color="var(--text-muted)" />
+                    }
+                  </span>
+                )}
+
+                {projects.length <= 1 && <FolderOpen size={13} />}
 
                 {isRenaming ? (
                   <>
@@ -155,7 +179,6 @@ export function LeftPanel() {
                     <button
                       className="project-item__action"
                       onClick={(e) => { e.stopPropagation(); commitRename(); }}
-                      title={t("confirm.cancel").replace(/.+/, "OK")}
                     >
                       <Check size={12} />
                     </button>

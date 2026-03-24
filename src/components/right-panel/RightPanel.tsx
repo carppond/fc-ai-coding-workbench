@@ -147,7 +147,6 @@ export function RightPanel() {
   }, [activeProject]);
 
   // Smart polling: pause when unfocused, exponential backoff on failure
-  // Uses refreshLite (status + branchInfo only) to reduce I/O pressure
   const scheduleNext = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
     if (!activeProject || !focusedRef.current) return;
