@@ -20,7 +20,7 @@ export function GitActions() {
   const error = useGitStore((s) => s.error);
   const clearError = useGitStore((s) => s.clearError);
   const fileStatuses = useGitStore((s) => s.fileStatuses);
-  const activeProject = useProjectStore((s) => s.activeProject);
+  const gitPath = useProjectStore((s) => s.gitContextPath ?? s.activeProject?.path ?? null);
   const { t } = useI18n();
   const { toast } = useToast();
   const { confirm } = useConfirm();
@@ -38,7 +38,7 @@ export function GitActions() {
   }, [error]);
 
   const handleCommit = async () => {
-    if (!activeProject) return;
+    if (!gitPath) return;
     const result = await confirm({
       title: t("git.commit"),
       message: t("git.commitConfirm"),
@@ -46,12 +46,11 @@ export function GitActions() {
       extraLabel: t("git.commitOnly"),
     });
     if (!result) return;
-    const ok = await commit(activeProject.path);
+    const ok = await commit(gitPath);
     if (!ok) return;
     toast(t("git.commitSuccess"), "success");
     if (result === true) {
-      // "提交并推送"
-      const pushOk = await push(activeProject.path);
+      const pushOk = await push(gitPath);
       if (pushOk) toast(t("git.pushSuccess"), "success");
     }
   };
@@ -59,42 +58,42 @@ export function GitActions() {
   const hasUncommitted = fileStatuses.length > 0;
 
   const handlePull = async () => {
-    if (!activeProject) return;
+    if (!gitPath) return;
     const msg = hasUncommitted
       ? t("git.pullConfirmDirty")
       : t("git.pullConfirm");
     if (!(await confirm({ title: t("git.pull"), message: msg }))) return;
-    const ok = await pull(activeProject.path);
+    const ok = await pull(gitPath);
     if (ok) toast(t("git.pullSuccess"), "success");
   };
 
   const handleGenerate = async () => {
-    if (!activeProject || !hasStagedFiles) return;
-    const ok = await genCommitMsg(activeProject.path);
+    if (!gitPath || !hasStagedFiles) return;
+    const ok = await genCommitMsg(gitPath);
     if (!ok) {
       toast(t("git.noStagedForAI"), "error");
     }
   };
 
   const handleStash = async () => {
-    if (!activeProject) return;
+    if (!gitPath) return;
     if (!hasUncommitted) {
       toast(t("git.stashNothingToSave"), "error");
       return;
     }
-    const ok = await stashSave(activeProject.path);
+    const ok = await stashSave(gitPath);
     if (ok) {
       toast(t("git.stashSaved"), "success");
     }
   };
 
   const handlePush = async () => {
-    if (!activeProject) return;
+    if (!gitPath) return;
     const msg = hasUncommitted
       ? t("git.pushConfirmDirty")
       : t("git.pushConfirm");
     if (!(await confirm({ title: t("git.push"), message: msg }))) return;
-    const ok = await push(activeProject.path);
+    const ok = await push(gitPath);
     if (ok) toast(t("git.pushSuccess"), "success");
   };
 

@@ -22,7 +22,7 @@ function isValidGitUrl(url: string): boolean {
 }
 
 function GitInitForm() {
-  const activeProject = useProjectStore((s) => s.activeProject);
+  const gitPath = useProjectStore((s) => s.gitContextPath ?? s.activeProject?.path ?? null);
   const initRepo = useGitStore((s) => s.initRepo);
   const operating = useGitStore((s) => s.operating);
   const { t } = useI18n();
@@ -33,7 +33,7 @@ function GitInitForm() {
   const [urlError, setUrlError] = useState("");
 
   const handleInit = async (skipRemote: boolean) => {
-    if (!activeProject) return;
+    if (!gitPath) return;
 
     const url = remoteUrl.trim();
     if (!skipRemote && url) {
@@ -44,7 +44,7 @@ function GitInitForm() {
     }
     setUrlError("");
 
-    const ok = await initRepo(activeProject.path, skipRemote ? undefined : url || undefined);
+    const ok = await initRepo(gitPath, skipRemote ? undefined : url || undefined);
     if (ok) {
       toast(t("git.initSuccess"), "success");
     } else {
@@ -130,6 +130,7 @@ const MAX_BACKOFF = 30000;
 
 export function RightPanel() {
   const activeProject = useProjectStore((s) => s.activeProject);
+  const gitContextPath = useProjectStore((s) => s.gitContextPath);
   const isGitRepo = useGitStore((s) => s.isGitRepo);
   const refresh = useGitStore((s) => s.refresh);
   const refreshLite = useGitStore((s) => s.refreshLite);
@@ -139,39 +140,42 @@ export function RightPanel() {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const focusedRef = useRef(true);
 
+  // 源代码管理使用的项目路径：gitContextPath 优先，fallback 到 activeProject
+  const effectivePath = gitContextPath ?? activeProject?.path ?? null;
+
   useEffect(() => {
     reset();
-    if (activeProject) {
-      refresh(activeProject.path);
+    if (effectivePath) {
+      refresh(effectivePath);
     }
-  }, [activeProject]);
+  }, [effectivePath]);
 
   // Smart polling: pause when unfocused, exponential backoff on failure
   const scheduleNext = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
-    if (!activeProject || !focusedRef.current) return;
+    if (!effectivePath || !focusedRef.current) return;
 
     const backoff = Math.min(POLL_INTERVAL * Math.pow(2, failCountRef.current), MAX_BACKOFF);
 
     timerRef.current = setTimeout(async () => {
-      if (!activeProject || !focusedRef.current) return;
+      if (!effectivePath || !focusedRef.current) return;
       try {
-        await refreshLite(activeProject.path);
+        await refreshLite(effectivePath);
         failCountRef.current = 0;
       } catch {
         failCountRef.current = Math.min(failCountRef.current + 1, 5);
       }
       scheduleNext();
     }, backoff);
-  }, [activeProject, refreshLite]);
+  }, [effectivePath, refreshLite]);
 
   useEffect(() => {
-    if (!activeProject) return;
+    if (!effectivePath) return;
 
     const handleFocus = () => {
       focusedRef.current = true;
       failCountRef.current = 0;
-      refresh(activeProject.path);
+      refresh(effectivePath!);
       scheduleNext();
     };
 
@@ -191,7 +195,7 @@ export function RightPanel() {
       window.removeEventListener("blur", handleBlur);
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [activeProject, refresh, scheduleNext]);
+  }, [effectivePath, refresh, scheduleNext]);
 
   // 拖拽分割：直接操作 DOM，不加 wrapper，不触发 re-render
   // 必须放在条件 return 之前（React Hooks 规则）

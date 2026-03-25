@@ -26,7 +26,7 @@ export function GitStash() {
   const stashApply = useGitStore((s) => s.stashApply);
   const stashDrop = useGitStore((s) => s.stashDrop);
   const operating = useGitStore((s) => s.operating);
-  const activeProject = useProjectStore((s) => s.activeProject);
+  const gitPath = useProjectStore((s) => s.gitContextPath ?? s.activeProject?.path ?? null);
   const { t } = useI18n();
   const { toast } = useToast();
   const { confirm } = useConfirm();
@@ -36,21 +36,21 @@ export function GitStash() {
   if (stashEntries.length === 0) return null;
 
   const handleApply = async (index: number) => {
-    if (!activeProject) return;
-    const ok = await stashApply(activeProject.path, index);
+    if (!gitPath) return;
+    const ok = await stashApply(gitPath, index);
     if (ok) {
       toast(t("git.stashApplied"), "success");
     }
   };
 
   const handleDrop = async (index: number) => {
-    if (!activeProject) return;
+    if (!gitPath) return;
     const ok = await confirm({
       title: t("git.stashDrop"),
       message: t("git.stashDropConfirm"),
     });
     if (!ok) return;
-    const result = await stashDrop(activeProject.path, index);
+    const result = await stashDrop(gitPath, index);
     if (result) {
       toast(t("git.stashDropped"), "success");
     }

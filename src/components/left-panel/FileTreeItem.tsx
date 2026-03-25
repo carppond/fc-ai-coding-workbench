@@ -148,15 +148,14 @@ export const FileTreeItem = memo(function FileTreeItem({ entry, depth, defaultEx
   }, [contextMenu]);
 
   const handleClick = () => {
-    // 点击文件/目录时，自动切换 activeProject 到对应的项目根
-    const { activeProject, projects, selectedProjectIds, setActiveProject } = useProjectStore.getState();
-    if (selectedProjectIds.size > 1 && activeProject) {
-      // 找到该路径所属的项目
+    // 多项目模式下，点击文件/目录自动切换源代码管理上下文（不影响终端）
+    const { gitContextPath, projects, selectedProjectIds, setGitContext } = useProjectStore.getState();
+    if (selectedProjectIds.size > 1) {
       const ownerProject = projects.find(
         (p) => selectedProjectIds.has(p.id) && (entry.path === p.path || entry.path.startsWith(p.path + "/")),
       );
-      if (ownerProject && ownerProject.id !== activeProject.id) {
-        setActiveProject(ownerProject);
+      if (ownerProject && ownerProject.path !== gitContextPath) {
+        setGitContext(ownerProject.path);
       }
     }
 

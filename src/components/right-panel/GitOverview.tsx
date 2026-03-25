@@ -10,13 +10,13 @@ export function GitOverview() {
   const loading = useGitStore((s) => s.loading);
   const refresh = useGitStore((s) => s.refresh);
   const isGitRepo = useGitStore((s) => s.isGitRepo);
-  const activeProject = useProjectStore((s) => s.activeProject);
+  const gitPath = useProjectStore((s) => s.gitContextPath ?? s.activeProject?.path ?? null);
   const { t } = useI18n();
 
   const [showBranches, setShowBranches] = useState(false);
 
   const handleRefresh = () => {
-    if (activeProject) refresh(activeProject.path);
+    if (gitPath) refresh(gitPath);
   };
 
   if (!branchInfo) {

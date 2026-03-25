@@ -6,15 +6,19 @@ import { open } from "@tauri-apps/plugin-dialog";
 interface ProjectState {
   projects: Project[];
   activeProject: Project | null;
+  gitContextPath: string | null; // 右侧源代码管理当前操作的项目路径（文件树点击切换，不影响终端）
   selectedProjectIds: Set<string>; // 勾选的项目，同时显示在文件树和 Git 面板
   loading: boolean;
 
   loadProjects: () => Promise<void>;
   openProject: () => Promise<void>;
   setActiveProject: (project: Project) => Promise<void>;
+  setGitContext: (projectPath: string) => void; // 只切换源代码管理上下文，不影响终端
   renameProject: (id: string, name: string) => Promise<void>;
   deleteProject: (id: string) => Promise<void>;
   toggleProjectSelected: (id: string) => void;
+  /** 源代码管理使用的有效路径：gitContextPath 优先，fallback 到 activeProject.path */
+  getGitEffectivePath: () => string | null;
 }
 
 /* ── 持久化 selectedProjectIds ── */
@@ -35,6 +39,7 @@ async function loadSelectedIds(): Promise<string[]> {
 export const useProjectStore = create<ProjectState>((set, get) => ({
   projects: [],
   activeProject: null,
+  gitContextPath: null,
   selectedProjectIds: new Set<string>(),
   loading: false,
 
@@ -104,7 +109,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   setActiveProject: async (project) => {
     await ipc.updateProjectLastOpened(project.id);
-    set({ activeProject: project });
+    // 切换 activeProject 时同步 gitContextPath（终端 + 源代码管理一起切）
+    set({ activeProject: project, gitContextPath: project.path });
+  },
+
+  setGitContext: (projectPath) => {
+    set({ gitContextPath: projectPath });
   },
 
   renameProject: async (id, name) => {
@@ -150,5 +160,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
     set({ selectedProjectIds: ids });
     saveSelectedIds(ids);
+  },
+
+  getGitEffectivePath: () => {
+    const { gitContextPath, activeProject } = get();
+    return gitContextPath ?? activeProject?.path ?? null;
   },
 }));

@@ -16,7 +16,7 @@ export function BranchSelector({ onClose }: Props) {
   const createBranch = useGitStore((s) => s.createBranch);
   const deleteBranch = useGitStore((s) => s.deleteBranch);
   const operating = useGitStore((s) => s.operating);
-  const activeProject = useProjectStore((s) => s.activeProject);
+  const gitPath = useProjectStore((s) => s.gitContextPath ?? s.activeProject?.path ?? null);
   const { t } = useI18n();
 
   const [filter, setFilter] = useState("");
@@ -26,8 +26,8 @@ export function BranchSelector({ onClose }: Props) {
   const filterRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (activeProject) loadBranches(activeProject.path);
-  }, [activeProject, loadBranches]);
+    if (gitPath) loadBranches(gitPath);
+  }, [gitPath, loadBranches]);
 
   // 自动聚焦搜索框
   useEffect(() => {
@@ -54,24 +54,23 @@ export function BranchSelector({ onClose }: Props) {
   );
 
   const handleCheckout = async (branch: BranchListItem) => {
-    if (!activeProject || branch.is_current || operating) return;
-    // 远程分支取掉 origin/ 前缀
+    if (!gitPath || branch.is_current || operating) return;
     const name = branch.is_remote
       ? branch.name.replace(/^[^/]+\//, "")
       : branch.name;
-    const ok = await checkoutBranch(activeProject.path, name);
+    const ok = await checkoutBranch(gitPath, name);
     if (ok) onClose();
   };
 
   const handleCreate = async () => {
-    if (!activeProject || !newBranchName.trim() || operating) return;
-    const ok = await createBranch(activeProject.path, newBranchName.trim());
+    if (!gitPath || !newBranchName.trim() || operating) return;
+    const ok = await createBranch(gitPath, newBranchName.trim());
     if (ok) setNewBranchName("");
   };
 
   const handleDelete = async (name: string, force: boolean) => {
-    if (!activeProject || operating) return;
-    await deleteBranch(activeProject.path, name, force);
+    if (!gitPath || operating) return;
+    await deleteBranch(gitPath, name, force);
     setConfirmDelete(null);
   };
 

@@ -17,7 +17,7 @@ export function GitStatusList() {
   const stageAll = useGitStore((s) => s.stageAll);
   const unstageAll = useGitStore((s) => s.unstageAll);
   const discardFile = useGitStore((s) => s.discardFile);
-  const activeProject = useProjectStore((s) => s.activeProject);
+  const gitPath = useProjectStore((s) => s.gitContextPath ?? s.activeProject?.path ?? null);
   const { t } = useI18n();
   const { confirm } = useConfirm();
 
@@ -36,27 +36,27 @@ export function GitStatusList() {
   const hiddenUnstagedCount = unstaged.length - visibleUnstaged.length;
 
   const handleSelect = (filePath: string, isStaged: boolean) => {
-    if (!activeProject) return;
-    selectFile(activeProject.path, filePath, isStaged);
+    if (!gitPath) return;
+    selectFile(gitPath, filePath, isStaged);
   };
 
   const handleStage = (e: React.MouseEvent, filePath: string) => {
     e.stopPropagation();
-    if (!activeProject) return;
-    stageFile(activeProject.path, filePath);
+    if (!gitPath) return;
+    stageFile(gitPath, filePath);
   };
 
   const handleUnstage = (e: React.MouseEvent, filePath: string) => {
     e.stopPropagation();
-    if (!activeProject) return;
-    unstageFile(activeProject.path, filePath);
+    if (!gitPath) return;
+    unstageFile(gitPath, filePath);
   };
 
   const handleDiscard = async (e: React.MouseEvent, filePath: string) => {
     e.stopPropagation();
-    if (!activeProject) return;
+    if (!gitPath) return;
     if (!(await confirm({ title: t("git.discard"), message: t("git.discardConfirm"), confirmLabel: t("confirm.delete") }))) return;
-    discardFile(activeProject.path, filePath);
+    discardFile(gitPath, filePath);
   };
 
   const isSelected = (path: string, isStaged: boolean) =>
@@ -124,7 +124,7 @@ export function GitStatusList() {
             {!collapsedStaged && (
               <button
                 className="git-status-list__section-btn"
-                onClick={(e) => { e.stopPropagation(); activeProject && unstageAll(activeProject.path); }}
+                onClick={(e) => { e.stopPropagation(); gitPath && unstageAll(gitPath); }}
                 title={t("git.unstageAll")}
               >
                 <Minus size={12} />
@@ -188,7 +188,7 @@ export function GitStatusList() {
             {!collapsedUnstaged && (
               <button
                 className="git-status-list__section-btn"
-                onClick={(e) => { e.stopPropagation(); activeProject && stageAll(activeProject.path); }}
+                onClick={(e) => { e.stopPropagation(); gitPath && stageAll(gitPath); }}
                 title={t("git.stageAll")}
               >
                 <Plus size={12} />

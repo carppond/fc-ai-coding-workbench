@@ -40,7 +40,7 @@ export function GitLog() {
   const deleteTag = useGitStore((s) => s.deleteTag);
   const pushTag = useGitStore((s) => s.pushTag);
   const operating = useGitStore((s) => s.operating);
-  const activeProject = useProjectStore((s) => s.activeProject);
+  const gitPath = useProjectStore((s) => s.gitContextPath ?? s.activeProject?.path ?? null);
   const { t, locale } = useI18n();
   const { toast } = useToast();
   const { confirm } = useConfirm();
@@ -55,9 +55,9 @@ export function GitLog() {
   const [annotated, setAnnotated] = useState(false);
 
   const handleCreateTag = async () => {
-    if (!activeProject || !tagName.trim()) return;
+    if (!gitPath || !tagName.trim()) return;
     const ok = await createTag(
-      activeProject.path,
+      gitPath,
       tagName.trim(),
       annotated ? tagMessage.trim() || undefined : undefined,
       annotated,
@@ -72,21 +72,21 @@ export function GitLog() {
   };
 
   const handleDeleteTag = async (name: string) => {
-    if (!activeProject) return;
+    if (!gitPath) return;
     const ok = await confirm({
       title: t("git.deleteTag"),
       message: t("git.deleteTagConfirm").replace("{name}", name),
     });
     if (!ok) return;
-    const result = await deleteTag(activeProject.path, name);
+    const result = await deleteTag(gitPath, name);
     if (result) {
       toast(t("git.tagDeleted"), "success");
     }
   };
 
   const handlePushTag = async (name: string) => {
-    if (!activeProject) return;
-    const ok = await pushTag(activeProject.path, name);
+    if (!gitPath) return;
+    const ok = await pushTag(gitPath, name);
     if (ok) {
       toast(t("git.tagPushed"), "success");
     }
