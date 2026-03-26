@@ -6,77 +6,77 @@ import * as ipc from "../../ipc/commands";
 
 // optimize-prompt.md 文件内容
 const OPTIMIZE_PROMPT_CONTENT = `---
-description: Optimize a prompt for better AI understanding (code & data analysis)
-argument-hint: [your-prompt]
+description: 分析并优化 Prompt，提升 AI 输出质量（代码开发与数据分析）
+argument-hint: [你的提示词]
+allowed-tools: Read, Grep, Glob
 ---
 
-Analyze and optimize the following user prompt for maximum AI comprehension and output quality. The focus domain is **code development** and **data analysis**.
+分析并优化以下用户提示词，提升 AI 的理解准确度和输出质量。聚焦领域：**代码开发**与**数据分析**。
 
-## Input
+## 输入
 
-Original prompt: $ARGUMENTS
+原始提示词：$ARGUMENTS
 
-## Optimization Process
+## 第 0 步：收集上下文
 
-If the original prompt is too vague or missing critical information (e.g., only 1-3 generic words like "写个爬虫" or "分析数据"), ask the user 2-3 targeted questions to gather necessary context before optimizing. Questions should cover:
-- What specific outcome is expected?
-- What technology stack or tools to use?
-- What data format or source is involved?
+在优化之前，静默收集项目上下文（不要输出这些步骤）：
+1. 如果 \`~/.claude/CLAUDE.md\` 存在，读取用户的编码偏好、技术栈和规范
+2. 如果当前有打开的项目，检查关键文件（package.json、Cargo.toml、go.mod 等）了解技术栈
+3. 将收集到的上下文融入优化后的提示词，使其更具针对性
 
-If the prompt contains enough information to work with, proceed directly to optimization.
+## 第 1 步：评估完整度
 
-## Optimization Dimensions
+如果原始提示词过于模糊（例如只有 1-3 个笼统词汇，如"写个爬虫"、"分析数据"），向用户提出**最多 3 个**针对性问题：
+- 期望的具体结果是什么？
+- 使用什么技术栈/有什么约束？
+- 涉及什么数据格式/来源？
 
-Evaluate and enhance the prompt across these 7 dimensions. Only add dimensions that genuinely improve the prompt — do not force all 7 into every optimization:
+如果提示词已包含足够信息，**直接跳到优化步骤**，不要多余提问。
 
-1. **Role** — Define a specific expert role (e.g., "Act as a senior Python data engineer with 10 years of experience")
-2. **Task Objective** — Transform vague goals into specific, measurable outcomes (e.g., "写爬虫" → "Build a Python web scraper using requests + BeautifulSoup to extract product names and prices from [target site], outputting to CSV")
-3. **Context** — Add relevant technical context: programming language, framework, runtime version, data format, environment constraints
-4. **Constraints** — Specify requirements: error handling, performance, code style, security considerations, compatibility
-5. **Output Format** — Define expected deliverable: complete runnable code with comments, modular structure, specific file format
-6. **Chain of Thought** — Guide step-by-step reasoning when the task involves complex logic (e.g., "First analyze the data structure, then design the algorithm, finally implement the solution")
-7. **Examples** — Include input/output samples when the expected behavior needs clarification
+## 第 2 步：优化
 
-## User Preferences
+仅使用**真正有价值的维度**来增强提示词。一个好的提示词可能只需要 2-3 个维度，不需要全部用上。**绝对不要为了凑数而硬塞维度。**
 
-If \`~/.claude/CLAUDE.md\` exists, read it to incorporate the user's coding preferences, tech stack, and conventions into the optimized prompt.
+可用维度（按需选择）：
 
-## Output Format
+| 维度 | 适用场景 | 跳过场景 |
+|------|---------|---------|
+| **角色设定** | 任务需要特定领域专业知识 | 简单工具类任务 |
+| **任务目标** | 目标模糊或有歧义 | 已经具体且可衡量 |
+| **技术上下文** | 缺少技术栈/环境信息 | 已指定或可从项目推断 |
+| **约束条件** | 质量要求重要（性能、安全、风格） | 快速原型或探索性任务 |
+| **输出格式** | 期望交付物不明确 | 显而易见（如"修复这个 bug"） |
+| **示例** | 期望行为需要澄清 | 逻辑简单直白 |
 
-Present the results in this exact structure:
+## 第 3 步：输出
+
+使用中文输出全部内容。
 
 ### 原始 Prompt
-> (Display the user's original prompt as-is)
+> （原样展示用户的输入）
 
-### 分析
-Identify specific issues in the original prompt:
-- What is ambiguous or unclear?
-- What critical information is missing?
-- What structural improvements are needed?
-
-(Use bullet points, be specific, not generic)
+### 问题诊断
+- （列出 2-4 个具体问题：哪里模糊、缺少什么信息、可能被误解的地方）
 
 ### 优化后 Prompt
 
-(Output the optimized prompt below. Use English as the primary language for instructions, with Chinese annotations in parentheses where helpful for user understanding. The optimized prompt should be a complete, ready-to-use prompt that can be directly sent to any AI model.)
+\`\`\`
+（完整的、可直接使用的优化后提示词。应当自包含——可以直接发送给任何 AI 模型，无需额外上下文。）
+\`\`\`
 
-[The optimized prompt here]
+### 改动摘要
 
-### 改动说明
+| 改动内容 | 理由 |
+|---------|------|
+| （具体改了什么） | （为什么这样改——一句话） |
 
-| 维度 | 改动内容 | 理由 |
-|------|---------|------|
-| (Dimension) | (What was changed) | (Why it improves the prompt) |
+（只列出实际改动。如果原始提示词已经很好，直接说明并建议微调即可。）
 
-(Only list dimensions that were actually modified)
+## 最后一步
 
-## Final Step
+询问：**"是否直接按优化后的 Prompt 执行？或者需要调整某些部分？"**
 
-After presenting the optimized prompt, ask:
-
-"是否直接按优化后的 Prompt 执行？或者需要调整某些部分？"
-
-If the user confirms, execute the optimized prompt immediately in the current conversation.
+如果用户确认，立即在当前对话中执行优化后的提示词。
 `;
 
 // code-review.md 文件内容
