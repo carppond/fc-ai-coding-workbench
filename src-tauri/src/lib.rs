@@ -133,6 +133,7 @@ pub fn run() {
             commands::env_commands::detect_platform,
             commands::env_commands::get_claude_resume_enabled,
             commands::env_commands::set_claude_resume_enabled,
+            commands::env_commands::fetch_url,
             // Setup commands
             commands::setup_commands::check_environment,
             commands::setup_commands::run_install_command,

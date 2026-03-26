@@ -142,6 +142,7 @@ const translations: Record<Locale, Record<string, string>> = {
 
     // TopBar - Theme
     "topbar.switchTheme": "切换主题",
+    "topbar.ipCheck": "IP 检测",
 
     // SetupWizard
     "wizard.welcome": "欢迎使用拾光 AI 编程平台",
@@ -481,6 +482,7 @@ const translations: Record<Locale, Record<string, string>> = {
 
     // TopBar - Theme
     "topbar.switchTheme": "Switch Theme",
+    "topbar.ipCheck": "IP Check",
 
     // SetupWizard
     "wizard.welcome": "Welcome to ShiGuang AI Coding Platform",

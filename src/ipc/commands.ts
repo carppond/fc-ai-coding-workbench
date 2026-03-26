@@ -345,6 +345,9 @@ export const getClaudeResumeEnabled = () =>
 export const setClaudeResumeEnabled = (enabled: boolean) =>
   invoke<string>("set_claude_resume_enabled", { enabled });
 
+export const fetchUrl = (url: string) =>
+  invoke<string>("fetch_url", { url });
+
 // --- Setup ---
 
 export interface EnvCheckResult {

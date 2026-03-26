@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { FolderOpen, Globe, Palette, Settings, X, Info, BookOpen } from "lucide-react";
+import { FolderOpen, Globe, Palette, Settings, X, Info, BookOpen, Wifi, Loader2 } from "lucide-react";
 import { useProjectStore } from "../../stores/projectStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useI18n } from "../../lib/i18n";
@@ -315,6 +315,53 @@ function ShortcutsReference() {
   );
 }
 
+function IpCheckButton() {
+  const { t } = useI18n();
+  const [checking, setChecking] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+
+  const handleCheck = async () => {
+    if (checking) return;
+    setChecking(true);
+    try {
+      const text = await ipc.fetchUrl("https://myip.ipip.net/");
+      setResult(text.trim());
+    } catch (e) {
+      setResult(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        className="top-bar__btn"
+        onClick={handleCheck}
+        title="IP Check"
+        style={{ fontSize: 11, fontWeight: 500, width: "auto", gap: 4, display: "flex", alignItems: "center", whiteSpace: "nowrap" }}
+      >
+        {checking
+          ? <Loader2 size={14} className="spin" color="var(--text-secondary)" />
+          : <Wifi size={14} color="var(--text-secondary)" />
+        }
+        <span style={{ color: "var(--text-muted)" }}>{t("topbar.ipCheck")}</span>
+      </button>
+
+      {result && (
+        <div className="ip-check-dialog" onClick={() => setResult(null)}>
+          <div className="ip-check-dialog__content" onClick={(e) => e.stopPropagation()}>
+            <div className="ip-check-dialog__text">{result}</div>
+            <button className="btn btn--ghost btn--sm" onClick={() => setResult(null)}>
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 export function TopBar() {
   const { openProject } = useProjectStore();
   const { loading, theme, cycleTheme, envCache } = useSettingsStore();
@@ -347,6 +394,8 @@ export function TopBar() {
           <Palette size={15} color="var(--text-secondary)" />
           <span style={{ color: "var(--text-muted)" }}>{t("topbar.switchTheme")}</span>
         </button>
+
+        <IpCheckButton />
 
         <button
           className="top-bar__btn"
