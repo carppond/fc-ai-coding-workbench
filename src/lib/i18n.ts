@@ -339,6 +339,10 @@ const translations: Record<Locale, Record<string, string>> = {
     "command.debugDesc": "分析错误信息，定位根因并提供修复方案",
     "command.genTestsDesc": "为指定文件或函数生成单元测试",
     "command.genDocsDesc": "为文件、模块或项目生成用户导向的使用文档",
+    "command.fridaHookDesc": "生成或更新 Frida Hook 脚本（iOS/Android 逆向）",
+    "command.debugIosDesc": "分析 iOS 崩溃日志和运行时错误，定位根因并修复",
+    "command.deployCheckDesc": "部署前检查（nginx/SSL/端口/防火墙/脚本/OTA）",
+    "command.idaAnalyzeDesc": "IDA 逆向分析辅助（反编译、调用链、数据流、反调试）",
     "command.install": "安装",
     "command.update": "更新",
     "command.uninstall": "卸载",
@@ -347,6 +351,8 @@ const translations: Record<Locale, Record<string, string>> = {
     "command.installSuccess": "安装成功！在 Claude CLI 中输入 /命令名 使用",
     "command.uninstallSuccess": "已卸载",
     "command.hint": "安装后在 Claude CLI 输入 /命令名 [参数] 即可使用",
+    "command.usage": "使用说明",
+    "command.usageExamples": "使用示例：",
 
     // Language toggle
     "locale.toggle": "中/EN",
@@ -679,6 +685,10 @@ const translations: Record<Locale, Record<string, string>> = {
     "command.debugDesc": "Analyze error messages and locate root cause",
     "command.genTestsDesc": "Generate unit tests for the specified file or function",
     "command.genDocsDesc": "Generate user-oriented documentation for files, modules or projects",
+    "command.fridaHookDesc": "Generate or update Frida hook scripts (iOS/Android reverse engineering)",
+    "command.debugIosDesc": "Analyze iOS crash logs and runtime errors, locate root cause and fix",
+    "command.deployCheckDesc": "Pre-deploy check (nginx/SSL/ports/firewall/scripts/OTA)",
+    "command.idaAnalyzeDesc": "IDA reverse analysis (decompile, call chains, data flow, anti-debug)",
     "command.install": "Install",
     "command.update": "Update",
     "command.uninstall": "Uninstall",
@@ -687,6 +697,8 @@ const translations: Record<Locale, Record<string, string>> = {
     "command.installSuccess": "Installed! Use /command-name in Claude CLI",
     "command.uninstallSuccess": "Uninstalled",
     "command.hint": "Use /command-name [args] in Claude CLI after install",
+    "command.usage": "Usage",
+    "command.usageExamples": "Examples:",
 
     // Language toggle
     "locale.toggle": "EN/中",
