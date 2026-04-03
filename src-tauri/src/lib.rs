@@ -116,6 +116,9 @@ pub fn run() {
             commands::git_commands::git_stash_save,
             commands::git_commands::git_stash_apply,
             commands::git_commands::git_stash_drop,
+            commands::git_commands::git_resolve_ours,
+            commands::git_commands::git_resolve_theirs,
+            commands::git_commands::git_merge_abort,
             // Project commands
             commands::project_commands::read_directory_tree,
             commands::project_commands::read_directory_children,

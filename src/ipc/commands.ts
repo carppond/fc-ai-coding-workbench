@@ -276,6 +276,17 @@ export const gitStashApply = (projectPath: string, index: number) =>
 export const gitStashDrop = (projectPath: string, index: number) =>
   invoke<void>("git_stash_drop", { projectPath, index });
 
+// --- Git Conflict ---
+
+export const gitResolveOurs = (projectPath: string, filePath: string) =>
+  invoke<void>("git_resolve_ours", { projectPath, filePath });
+
+export const gitResolveTheirs = (projectPath: string, filePath: string) =>
+  invoke<void>("git_resolve_theirs", { projectPath, filePath });
+
+export const gitMergeAbort = (projectPath: string) =>
+  invoke<void>("git_merge_abort", { projectPath });
+
 // --- Git Tag ---
 
 export const gitTagList = (projectPath: string) =>

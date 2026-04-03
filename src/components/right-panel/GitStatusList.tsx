@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
-import { CheckCircle2, Circle, Plus, Minus, Undo2, ChevronDown, ChevronRight } from "lucide-react";
+import { CheckCircle2, Circle, Plus, Minus, Undo2, ChevronDown, ChevronRight, AlertTriangle, FileEdit } from "lucide-react";
 import { useGitStore } from "../../stores/gitStore";
+import { useFileStore } from "../../stores/fileStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useI18n } from "../../lib/i18n";
 import { useConfirm } from "../common/ConfirmDialog";
@@ -17,6 +18,9 @@ export function GitStatusList() {
   const stageAll = useGitStore((s) => s.stageAll);
   const unstageAll = useGitStore((s) => s.unstageAll);
   const discardFile = useGitStore((s) => s.discardFile);
+  const resolveOurs = useGitStore((s) => s.resolveOurs);
+  const resolveTheirs = useGitStore((s) => s.resolveTheirs);
+  const openFile = useFileStore((s) => s.openFile);
   const gitPath = useProjectStore((s) => s.gitContextPath ?? s.activeProject?.path ?? null);
   const { t } = useI18n();
   const { confirm } = useConfirm();
@@ -25,9 +29,11 @@ export function GitStatusList() {
   const [expandedUnstaged, setExpandedUnstaged] = useState(false);
   const [collapsedStaged, setCollapsedStaged] = useState(false);
   const [collapsedUnstaged, setCollapsedUnstaged] = useState(false);
+  const [collapsedConflict, setCollapsedConflict] = useState(false);
 
-  const staged = useMemo(() => fileStatuses.filter((f) => f.staged), [fileStatuses]);
-  const unstaged = useMemo(() => fileStatuses.filter((f) => !f.staged), [fileStatuses]);
+  const conflicted = useMemo(() => fileStatuses.filter((f) => f.status === "conflicted"), [fileStatuses]);
+  const staged = useMemo(() => fileStatuses.filter((f) => f.staged && f.status !== "conflicted"), [fileStatuses]);
+  const unstaged = useMemo(() => fileStatuses.filter((f) => !f.staged && f.status !== "conflicted"), [fileStatuses]);
   const isTruncated = fileStatuses.length >= MAX_STATUS_ENTRIES;
 
   const visibleStaged = expandedStaged ? staged : staged.slice(0, VISIBLE_LIMIT);
@@ -112,6 +118,56 @@ export function GitStatusList() {
 
   return (
     <div className="git-status-list">
+      {/* 冲突文件区域 */}
+      {conflicted.length > 0 && (
+        <div className="git-status-list__section">
+          <div
+            className="git-status-list__section-title git-status-list__section-title--conflict"
+            onClick={() => setCollapsedConflict(!collapsedConflict)}
+          >
+            {collapsedConflict ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+            <AlertTriangle size={12} />
+            <span style={{ flex: 1 }}>{t("git.conflicted")} ({conflicted.length})</span>
+          </div>
+          {!collapsedConflict && conflicted.map((f) => (
+            <div
+              key={`c-${f.path}`}
+              className="git-file-entry"
+              onClick={() => gitPath && selectFile(gitPath, f.path, false)}
+            >
+              <span className="git-file-entry__staged-icon" style={{ color: "var(--error)" }}>
+                <AlertTriangle size={13} />
+              </span>
+              <span className="git-file-entry__status git-file-entry__status--conflicted">C</span>
+              <span className="git-file-entry__path">{f.path}</span>
+              <div className="git-conflict-actions">
+                <button
+                  className="git-file-entry__action"
+                  onClick={(e) => { e.stopPropagation(); gitPath && resolveOurs(gitPath, f.path); }}
+                  title={t("git.resolveOurs")}
+                >
+                  <span style={{ fontSize: 10, fontWeight: 600 }}>{t("git.resolveOurs")}</span>
+                </button>
+                <button
+                  className="git-file-entry__action"
+                  onClick={(e) => { e.stopPropagation(); gitPath && resolveTheirs(gitPath, f.path); }}
+                  title={t("git.resolveTheirs")}
+                >
+                  <span style={{ fontSize: 10, fontWeight: 600 }}>{t("git.resolveTheirs")}</span>
+                </button>
+                <button
+                  className="git-file-entry__action"
+                  onClick={(e) => { e.stopPropagation(); gitPath && openFile(gitPath + "/" + f.path); }}
+                  title={t("git.resolveEdit")}
+                >
+                  <FileEdit size={13} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {staged.length > 0 && (
         <div className="git-status-list__section">
           <div

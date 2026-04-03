@@ -106,6 +106,9 @@ interface GitState {
   stageAll: (projectPath: string) => Promise<void>;
   unstageAll: (projectPath: string) => Promise<void>;
   discardFile: (projectPath: string, filePath: string) => Promise<void>;
+  resolveOurs: (projectPath: string, filePath: string) => Promise<void>;
+  resolveTheirs: (projectPath: string, filePath: string) => Promise<void>;
+  mergeAbort: (projectPath: string) => Promise<boolean>;
   initRepo: (projectPath: string, remoteUrl?: string) => Promise<boolean>;
   commit: (projectPath: string) => Promise<boolean>;
   pull: (projectPath: string) => Promise<boolean>;
@@ -595,6 +598,50 @@ export const useGitStore = create<GitState>((set, get) => ({
     } finally {
       set({ operating: false });
       _refreshAfterFileOp(projectPath, set, get);
+    }
+  },
+
+  // --- Conflict resolution ---
+
+  resolveOurs: async (projectPath, filePath) => {
+    if (get().operating) return;
+    set({ operating: true, error: null });
+    try {
+      await ipc.gitResolveOurs(projectPath, filePath);
+      set({ selectedFile: null, selectedFileDiff: "" });
+    } catch (e: unknown) {
+      set({ error: extractErrorMessage(e) });
+    } finally {
+      set({ operating: false });
+      _refreshAfterFileOp(projectPath, set, get);
+    }
+  },
+
+  resolveTheirs: async (projectPath, filePath) => {
+    if (get().operating) return;
+    set({ operating: true, error: null });
+    try {
+      await ipc.gitResolveTheirs(projectPath, filePath);
+      set({ selectedFile: null, selectedFileDiff: "" });
+    } catch (e: unknown) {
+      set({ error: extractErrorMessage(e) });
+    } finally {
+      set({ operating: false });
+      _refreshAfterFileOp(projectPath, set, get);
+    }
+  },
+
+  mergeAbort: async (projectPath) => {
+    if (get().operating) return false;
+    set({ operating: true, error: null });
+    try {
+      await ipc.gitMergeAbort(projectPath);
+      set({ operating: false });
+      get().refresh(projectPath);
+      return true;
+    } catch (e: unknown) {
+      set({ error: extractErrorMessage(e), operating: false });
+      return false;
     }
   },
 

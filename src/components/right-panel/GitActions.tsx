@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Loader2, Sparkles, Archive } from "lucide-react";
+import { Loader2, Sparkles, Archive, XCircle, AlertTriangle } from "lucide-react";
 import { useGitStore } from "../../stores/gitStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useI18n } from "../../lib/i18n";
@@ -20,6 +20,7 @@ export function GitActions() {
   const error = useGitStore((s) => s.error);
   const clearError = useGitStore((s) => s.clearError);
   const fileStatuses = useGitStore((s) => s.fileStatuses);
+  const mergeAbort = useGitStore((s) => s.mergeAbort);
   const gitPath = useProjectStore((s) => s.gitContextPath ?? s.activeProject?.path ?? null);
   const { t } = useI18n();
   const { toast } = useToast();
@@ -27,6 +28,7 @@ export function GitActions() {
   const prevErrorRef = useRef<string | null>(null);
 
   const hasStagedFiles = fileStatuses.some((f) => f.staged);
+  const conflictCount = fileStatuses.filter((f) => f.status === "conflicted").length;
 
   // Watch for new errors and show as toast
   useEffect(() => {
@@ -97,8 +99,31 @@ export function GitActions() {
     if (ok) toast(t("git.pushSuccess"), "success");
   };
 
+  const handleMergeAbort = async () => {
+    if (!gitPath) return;
+    if (!(await confirm({ title: t("git.mergeAbort"), message: t("git.mergeAbortConfirm") }))) return;
+    const ok = await mergeAbort(gitPath);
+    if (ok) toast(t("git.mergeAbortSuccess"), "success");
+  };
+
   return (
     <div className="git-actions">
+      {/* 冲突警告 */}
+      {conflictCount > 0 && (
+        <div className="git-conflict-warning">
+          <AlertTriangle size={13} />
+          <span>{t("git.conflictWarning").replace("{count}", String(conflictCount))}</span>
+          <button
+            className="btn btn--ghost btn--sm"
+            onClick={handleMergeAbort}
+            disabled={operating}
+            style={{ marginLeft: "auto", fontSize: 11, color: "var(--error)" }}
+          >
+            <XCircle size={12} />
+            {t("git.mergeAbort")}
+          </button>
+        </div>
+      )}
       <div className="git-actions__input-wrapper">
         <textarea
           className="git-actions__input"

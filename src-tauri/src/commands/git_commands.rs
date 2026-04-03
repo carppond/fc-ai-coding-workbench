@@ -153,3 +153,18 @@ pub async fn git_stash_apply(project_path: String, index: usize) -> AppResult<()
 pub async fn git_stash_drop(project_path: String, index: usize) -> AppResult<()> {
     git::stash_drop(&project_path, index)
 }
+
+#[tauri::command]
+pub async fn git_resolve_ours(project_path: String, file_path: String) -> AppResult<()> {
+    git::resolve_ours(&project_path, &file_path).await
+}
+
+#[tauri::command]
+pub async fn git_resolve_theirs(project_path: String, file_path: String) -> AppResult<()> {
+    git::resolve_theirs(&project_path, &file_path).await
+}
+
+#[tauri::command]
+pub async fn git_merge_abort(project_path: String) -> AppResult<()> {
+    git::merge_abort(&project_path).await
+}

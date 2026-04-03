@@ -1611,6 +1611,35 @@
   color: var(--error);
 }
 
+.git-file-entry__status--conflicted {
+  color: var(--error);
+  font-weight: 700;
+}
+
+.git-status-list__section-title--conflict {
+  color: var(--error);
+}
+
+.git-conflict-actions {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.git-conflict-warning {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--warning) 20%, transparent);
+}
+
 .git-file-entry__path {
   flex: 1;
   overflow: hidden;

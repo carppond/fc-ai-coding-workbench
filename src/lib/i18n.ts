@@ -136,6 +136,14 @@ const translations: Record<Locale, Record<string, string>> = {
     "git.branchSwitched": "已切换到分支",
     "git.searchBranches": "搜索分支...",
     "git.notGitRepo": "非 Git 仓库",
+    "git.conflicted": "冲突",
+    "git.resolveOurs": "本地",
+    "git.resolveTheirs": "远程",
+    "git.resolveEdit": "编辑",
+    "git.mergeAbort": "中止合并",
+    "git.mergeAbortConfirm": "确定中止合并？所有冲突解决的进度将丢失。",
+    "git.mergeAbortSuccess": "已中止合并",
+    "git.conflictWarning": "有 {count} 个文件冲突，请先解决",
 
     // Project multi-select
     "project.deselect": "取消选中",
@@ -482,6 +490,14 @@ const translations: Record<Locale, Record<string, string>> = {
     "git.branchSwitched": "Switched to branch",
     "git.searchBranches": "Search branches...",
     "git.notGitRepo": "Not a Git repo",
+    "git.conflicted": "Conflicts",
+    "git.resolveOurs": "Ours",
+    "git.resolveTheirs": "Theirs",
+    "git.resolveEdit": "Edit",
+    "git.mergeAbort": "Abort Merge",
+    "git.mergeAbortConfirm": "Abort merge? All conflict resolution progress will be lost.",
+    "git.mergeAbortSuccess": "Merge aborted",
+    "git.conflictWarning": "{count} file(s) in conflict, resolve before committing",
 
     // Project multi-select
     "project.deselect": "Deselect",

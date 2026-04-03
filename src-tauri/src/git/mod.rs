@@ -74,6 +74,16 @@ pub fn status(project_path: &str) -> AppResult<Vec<GitFileStatus>> {
             }
         }
 
+        // 冲突文件优先检测，不再归类为 staged/unstaged
+        if s.contains(git2::Status::CONFLICTED) {
+            result.push(GitFileStatus {
+                path: path.clone(),
+                status: "conflicted".to_string(),
+                staged: false,
+            });
+            continue;
+        }
+
         if s.contains(git2::Status::INDEX_NEW)
             || s.contains(git2::Status::INDEX_MODIFIED)
             || s.contains(git2::Status::INDEX_DELETED)
@@ -980,5 +990,34 @@ pub fn delete_branch(project_path: &str, branch_name: &str, force: bool) -> AppR
     }
 
     branch.delete()?;
+    Ok(())
+}
+
+/// 使用本地版本解决冲突（git checkout --ours + git add）
+pub async fn resolve_ours(project_path: &str, file_path: &str) -> AppResult<()> {
+    let (ok, _, stderr) = run_git(project_path, &["checkout", "--ours", "--", file_path]).await?;
+    if !ok {
+        return Err(AppError::General(stderr));
+    }
+    stage_file(project_path, file_path)?;
+    Ok(())
+}
+
+/// 使用远程版本解决冲突（git checkout --theirs + git add）
+pub async fn resolve_theirs(project_path: &str, file_path: &str) -> AppResult<()> {
+    let (ok, _, stderr) = run_git(project_path, &["checkout", "--theirs", "--", file_path]).await?;
+    if !ok {
+        return Err(AppError::General(stderr));
+    }
+    stage_file(project_path, file_path)?;
+    Ok(())
+}
+
+/// 中止合并
+pub async fn merge_abort(project_path: &str) -> AppResult<()> {
+    let (ok, _, stderr) = run_git(project_path, &["merge", "--abort"]).await?;
+    if !ok {
+        return Err(AppError::General(stderr));
+    }
     Ok(())
 }
