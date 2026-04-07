@@ -111,7 +111,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const terminalFontSize = clampFs(terminalFsVal, 14);
       const chatFontSize = clampFs(chatFsVal, 14);
       const terminalScrollback = typeof scrollbackVal === "number"
-        ? Math.max(1000, Math.min(100000, scrollbackVal)) : 5000;
+        ? Math.max(1000, Math.min(999999, scrollbackVal)) : 5000;
       const terminalLineHeight = typeof lineHeightVal === "number"
         ? Math.max(1.0, Math.min(2.0, lineHeightVal)) : 1.35;
       document.documentElement.style.setProperty("--chat-font-size", chatFontSize + "px");

@@ -206,7 +206,7 @@ function TerminalSettings() {
   const setTerminalScrollback = useSettingsStore((s) => s.setTerminalScrollback);
   const setTerminalLineHeight = useSettingsStore((s) => s.setTerminalLineHeight);
 
-  const scrollbackOptions = [1000, 3000, 5000, 10000, 20000, 50000, 100000];
+  const scrollbackOptions = [1000, 3000, 5000, 10000, 20000, 50000, 100000, 500000, 999999];
 
   return (
     <div className="font-settings">

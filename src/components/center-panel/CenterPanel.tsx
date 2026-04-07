@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, memo } from "react";
 import { createPortal } from "react-dom";
 import { Plus, X, RotateCw, Sparkles } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -67,6 +67,40 @@ function firstPaneId(node: LayoutNode): string {
 }
 
 /* ── 组件 ─────────────────────────────────────────────── */
+
+/**
+ * Memoized wrapper that bridges CenterPanel's useCallback handlers to Terminal's props.
+ * Prevents Terminal re-renders caused by inline arrow functions.
+ */
+const MemoTerminalWrapper = memo(function MemoTerminalWrapper({
+  projectPath, cwd, tabId, paneId,
+  onAliveChange, onSessionReady, onFocusReady, visible,
+}: {
+  projectPath: string | null;
+  cwd?: string;
+  tabId: string;
+  paneId: string;
+  onAliveChange: (tabId: string, paneId: string, alive: boolean) => void;
+  onSessionReady: (paneId: string, sessionId: string | null) => void;
+  onFocusReady: (paneId: string, focusFn: () => void) => void;
+  visible: boolean;
+}) {
+  // Stable callbacks that capture tabId/paneId without creating new functions
+  const alive = useCallback((a: boolean) => onAliveChange(tabId, paneId, a), [tabId, paneId, onAliveChange]);
+  const session = useCallback((sid: string | null) => onSessionReady(paneId, sid), [paneId, onSessionReady]);
+  const focus = useCallback((fn: () => void) => onFocusReady(paneId, fn), [paneId, onFocusReady]);
+
+  return (
+    <Terminal
+      projectPath={projectPath}
+      cwd={cwd}
+      onAliveChange={alive}
+      onSessionReady={session}
+      onFocusReady={focus}
+      visible={visible}
+    />
+  );
+});
 
 export function CenterPanel() {
   const { activeProject } = useProjectStore();
@@ -733,12 +767,14 @@ export function CenterPanel() {
               // 需要在此处追踪焦点，确保"开启CC"等功能作用于正确的 pane
               onMouseDown={multiPane ? () => handlePaneFocus(tab.id, leaf.paneId) : undefined}
             >
-              <Terminal
+              <MemoTerminalWrapper
                 projectPath={projectPath}
                 cwd={leaf.cwd}
-                onAliveChange={(alive) => handlePaneAliveChange(tab.id, leaf.paneId, alive)}
-                onSessionReady={(sid) => handlePaneSessionReady(leaf.paneId, sid)}
-                onFocusReady={(fn) => handlePaneFocusReady(leaf.paneId, fn)}
+                tabId={tab.id}
+                paneId={leaf.paneId}
+                onAliveChange={handlePaneAliveChange}
+                onSessionReady={handlePaneSessionReady}
+                onFocusReady={handlePaneFocusReady}
                 visible={isTabActive}
               />
             </div>,

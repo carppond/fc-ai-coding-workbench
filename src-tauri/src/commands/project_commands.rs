@@ -360,7 +360,7 @@ pub async fn list_all_files(project_path: String) -> AppResult<Vec<String>> {
 
 #[tauri::command]
 pub fn read_file_content(path: String, max_size: Option<u64>) -> AppResult<String> {
-    let max = max_size.unwrap_or(10_000_000); // 10MB default
+    let max = max_size.unwrap_or(200_000_000); // 200MB default
     let metadata = std::fs::metadata(&path)?;
     if metadata.len() > max {
         return Err(crate::errors::AppError::General(format!(

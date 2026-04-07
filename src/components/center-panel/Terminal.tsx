@@ -3,6 +3,7 @@ import { Terminal as XTerm, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { X, ChevronDown, ChevronUp } from "lucide-react";
 import "@xterm/xterm/css/xterm.css";
@@ -14,17 +15,11 @@ import * as ipc from "../../ipc/commands";
 import { useSettingsStore, type Theme } from "../../stores/settingsStore";
 
 /** Replace glyphs that render poorly in xterm.js with visually equivalent alternatives. */
-const GLYPH_REPLACEMENTS: [string, string][] = [
-  ["\u23FA", "\u25CF"],  // ⏺ → ● (filled circle)
-];
+const GLYPH_REGEX = /\u23FA/g; // ⏺ → ● (compiled once, reused per call)
+const GLYPH_REPLACE = "\u25CF";
 function fixGlyphs(text: string): string {
-  let result = text;
-  for (const [from, to] of GLYPH_REPLACEMENTS) {
-    if (result.includes(from)) {
-      result = result.replaceAll(from, to);
-    }
-  }
-  return result;
+  GLYPH_REGEX.lastIndex = 0;
+  return GLYPH_REGEX.test(text) ? (GLYPH_REGEX.lastIndex = 0, text.replace(GLYPH_REGEX, GLYPH_REPLACE)) : text;
 }
 
 const TERMINAL_THEMES: Record<Theme, ITheme> = {
@@ -574,9 +569,15 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
 
     term.open(containerRef.current);
 
-    // Note: WebGL renderer (WebglAddon) was tested but removed because it has
-    // weaker font fallback for CJK characters — some glyphs render as boxes.
-    // DOM renderer + CSS font-smoothing provides better quality for multilingual content.
+    // WebGL renderer for better performance (GPU-accelerated)
+    // Falls back to DOM renderer if WebGL is not available
+    try {
+      const webgl = new WebglAddon();
+      webgl.onContextLoss(() => { webgl.dispose(); });
+      term.loadAddon(webgl);
+    } catch {
+      // WebGL not available — DOM renderer used as fallback
+    }
 
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
