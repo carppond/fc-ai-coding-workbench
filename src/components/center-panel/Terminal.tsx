@@ -709,9 +709,15 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
 
     let disposed = false;
 
-    // Safe fit helper
+    // Safe fit helper — 只在维度真正变化时才 fit，避免滚动时滚动条变化触发的
+    // ResizeObserver 导致 fit() 重置滚动位置
     const safeFit = () => {
-      try { fitAddon.fit(); } catch { /* container not visible */ }
+      try {
+        const proposed = fitAddon.proposeDimensions();
+        if (proposed && (proposed.cols !== term.cols || proposed.rows !== term.rows)) {
+          fitAddon.fit();
+        }
+      } catch { /* container not visible */ }
     };
 
     // Spawn PTY after one animation frame (ensures DOM/layout is ready).
