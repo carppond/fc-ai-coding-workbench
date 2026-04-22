@@ -140,9 +140,20 @@ impl TerminalSession {
         }
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
-        cmd.env("TERM_PROGRAM", "ShiGuang");
-        cmd.env("TERM_FEATURES", "truecolor:clipboard:title:hyperlinks");
         cmd.env("AI_WORKBENCH_TERMINAL", "1");
+        cmd.env("FORCE_COLOR", "1");
+
+        // On Windows, ConPTY intercepts certain terminal capability queries
+        // (Device Attributes, Kitty keyboard protocol, OSC 52 clipboard, etc.)
+        // without forwarding responses. Setting TERM_PROGRAM to an unrecognized
+        // value causes TUI apps like Claude CLI (ink/React) to probe capabilities
+        // and hang waiting for a response that never comes.
+        // Solution: skip TERM_PROGRAM/TERM_FEATURES on Windows so apps use their
+        // default ConPTY-compatible code paths.
+        if cfg!(not(target_os = "windows")) {
+            cmd.env("TERM_PROGRAM", "ShiGuang");
+            cmd.env("TERM_FEATURES", "truecolor:clipboard:title:hyperlinks");
+        }
 
         // --- Cross-shell prompt inhibitors ---
         // These disable third-party prompt tools across all shells.
