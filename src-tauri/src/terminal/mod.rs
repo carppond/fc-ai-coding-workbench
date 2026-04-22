@@ -147,10 +147,10 @@ impl TerminalSession {
         // Attributes, Kitty keyboard protocol, OSC 52, etc.) without forwarding
         // responses. Setting TERM_PROGRAM to an unrecognized value causes TUI
         // apps (Claude CLI/ink) to probe capabilities and hang or misrender.
-        // Use "vscode" on Windows — VS Code's terminal is also ConPTY-based and
-        // Claude CLI has a well-tested rendering path for it.
+        // Use "xterm" on Windows — universally recognized, no special integration
+        // logic, and compatible with ConPTY's rendering behavior.
         if cfg!(target_os = "windows") {
-            cmd.env("TERM_PROGRAM", "vscode");
+            cmd.env("TERM_PROGRAM", "xterm");
         } else {
             cmd.env("TERM_PROGRAM", "ShiGuang");
             cmd.env("TERM_FEATURES", "truecolor:clipboard:title:hyperlinks");
