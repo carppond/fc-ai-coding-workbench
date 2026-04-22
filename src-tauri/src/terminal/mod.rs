@@ -143,14 +143,15 @@ impl TerminalSession {
         cmd.env("AI_WORKBENCH_TERMINAL", "1");
         cmd.env("FORCE_COLOR", "1");
 
-        // On Windows, ConPTY intercepts certain terminal capability queries
-        // (Device Attributes, Kitty keyboard protocol, OSC 52 clipboard, etc.)
-        // without forwarding responses. Setting TERM_PROGRAM to an unrecognized
-        // value causes TUI apps like Claude CLI (ink/React) to probe capabilities
-        // and hang waiting for a response that never comes.
-        // Solution: skip TERM_PROGRAM/TERM_FEATURES on Windows so apps use their
-        // default ConPTY-compatible code paths.
-        if cfg!(not(target_os = "windows")) {
+        // On Windows, ConPTY intercepts terminal capability queries (Device
+        // Attributes, Kitty keyboard protocol, OSC 52, etc.) without forwarding
+        // responses. Setting TERM_PROGRAM to an unrecognized value causes TUI
+        // apps (Claude CLI/ink) to probe capabilities and hang or misrender.
+        // Use "vscode" on Windows — VS Code's terminal is also ConPTY-based and
+        // Claude CLI has a well-tested rendering path for it.
+        if cfg!(target_os = "windows") {
+            cmd.env("TERM_PROGRAM", "vscode");
+        } else {
             cmd.env("TERM_PROGRAM", "ShiGuang");
             cmd.env("TERM_FEATURES", "truecolor:clipboard:title:hyperlinks");
         }
