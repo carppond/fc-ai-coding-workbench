@@ -87,7 +87,12 @@ Six Zustand stores in `src/stores/`: `chatStore`, `projectStore`, `fileStore`, `
 ## Platform Notes
 
 - **macOS**: Xcode Command Line Tools required. Universal binary via `cargo tauri build --target universal-apple-darwin`.
-- **Windows**: WebView2 runtime + Visual Studio Build Tools required.
+- **Windows**: WebView2 runtime + Visual Studio Build Tools required. Vite dev server must bind to `127.0.0.1` (not the default `false`/IPv6) or Tauri cannot connect to it.
 - **Linux**: Requires `libwebkit2gtk-4.1-dev libgtk-3-dev libappindicator3-dev librsvg2-dev patchelf`.
 - **App data**: stored at `com.shiguang.ai-coding` in the platform's standard app data directory.
 - Git staging auto-filters `node_modules`, `.git`, `target`, and similar directories.
+
+## Windows Terminal Caveats
+
+- **Do NOT set `TERM_PROGRAM` or `TERM_FEATURES` on Windows.** ConPTY intercepts terminal capability queries (Device Attributes, Kitty keyboard protocol, OSC 52, etc.) without forwarding responses. Setting `TERM_PROGRAM` to an unrecognized value causes TUI apps (Claude CLI/ink) to probe capabilities and hang waiting for a response that never comes. The env vars are only set on macOS/Linux (see `terminal/mod.rs`).
+- `terminal_commands.rs` uses `pgrep` for child-process detection (`kill_terminal`, `is_terminal_idle`) — this is Unix-only and silently fails on Windows.
