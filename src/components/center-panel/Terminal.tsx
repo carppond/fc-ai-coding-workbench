@@ -692,7 +692,9 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
     let pendingWrite = "";
     let flushQueued = false;
     term.onData((data) => {
-      if (!sessionIdRef.current) return;
+      if (!sessionIdRef.current) {
+        return;
+      }
       pendingWrite += data;
       if (!flushQueued) {
         flushQueued = true;
@@ -708,6 +710,8 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
     });
 
     let disposed = false;
+    let unlistenOutputFn: (() => void) | null = null;
+    let unlistenExitFn: (() => void) | null = null;
 
     // Safe fit helper — 只在维度真正变化时才 fit，避免滚动时滚动条变化触发的
     // ResizeObserver 导致 fit() 重置滚动位置
@@ -720,47 +724,47 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
       } catch { /* container not visible */ }
     };
 
-    // Spawn PTY after one animation frame (ensures DOM/layout is ready).
-    // projectPath may still be null here; the PTY will start in the default
-    // directory and CenterPanel will recreate the terminal once the project loads.
-    // Helper to set up event listeners and state after obtaining a session
-    const setupSession = (sessionId: string, shellName: string) => {
+    // Set up event listeners and state after obtaining a session.
+    // Async: awaits listener registration, then flushes buffered PTY output.
+    const setupSession = async (sessionId: string, shellName: string) => {
       if (disposed) {
         ipc.killTerminal(sessionId);
         return;
       }
       sessionIdRef.current = sessionId;
       shellNameRef.current = shellName;
-      onAliveChange?.(true);
-      onSessionReady?.(sessionId);
 
-      // Set up per-session event listeners AFTER we have sessionId
-      // When terminal is hidden, buffer output to avoid unnecessary xterm processing
-      listen<string>(`terminal-output-${sessionId}`, (event) => {
+      // Register listeners BEFORE subscribing so no output is lost
+      unlistenOutputFn = await listen<string>(`terminal-output-${sessionId}`, (event) => {
         if (disposed) return;
         const data = fixGlyphs(event.payload);
         if (visibleRef.current) {
           term.write(data);
         } else {
-          // Cap buffer to prevent unbounded memory growth from hidden terminals
           const buf = outputBufferRef.current;
           if (buf.length < 5000) {
             buf.push(data);
           }
         }
-      }).then((fn) => {
-        if (disposed) { fn(); return; }
-        unlistenOutputFn = fn;
       });
+      if (disposed) { unlistenOutputFn(); return; }
 
-      listen<string>(`terminal-exit-${sessionId}`, () => {
+      unlistenExitFn = await listen<string>(`terminal-exit-${sessionId}`, () => {
         if (disposed) return;
         term.write("\r\n[Process exited]\r\n");
         onAliveChange?.(false);
-      }).then((fn) => {
-        if (disposed) { fn(); return; }
-        unlistenExitFn = fn;
       });
+      if (disposed) { unlistenExitFn(); return; }
+
+      // Flush any output buffered by Rust while listeners were not ready.
+      // Race with a timeout so the terminal still works if the IPC call stalls.
+      await Promise.race([
+        ipc.terminalSubscribe(sessionId).catch(() => {}),
+        new Promise<void>((r) => setTimeout(r, 2000)),
+      ]);
+
+      onAliveChange?.(true);
+      onSessionReady?.(sessionId);
 
       // Pre-warm next terminal session (fire-and-forget)
       ipc.warmupTerminal(projectPathRef.current ?? undefined).catch(() => {});
@@ -774,24 +778,23 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
 
       // Try to claim a pre-warmed terminal first, fallback to normal spawn
       ipc.claimWarmupTerminal(path ?? undefined, term.rows, term.cols)
-        .then((result) => {
+        .then(async (result) => {
           if (disposed) return;
           if (result) {
-            // Got a pre-warmed session — set up listener first, then cd
-            setupSession(result[0], result[1]);
+            // Got a pre-warmed session — set up listener & subscribe first, then cd
+            await setupSession(result[0], result[1]);
+            if (disposed) return;
             if (path) {
-              // 隐藏终端，避免 cd+clear 命令回显闪烁
               const el = containerRef.current;
               if (el) el.style.visibility = "hidden";
               ipc.terminalCd(result[0], path).finally(() => {
-                // cd 已写入 PTY，等待 shell 处理完成后再显示
                 setTimeout(() => { if (el) el.style.visibility = ""; }, 150);
               });
             }
           } else {
             // No warmup available — normal spawn
-            return ipc.spawnTerminal(path ?? undefined, term.rows, term.cols)
-              .then(([sessionId, shellName]) => setupSession(sessionId, shellName));
+            const [sessionId, shellName] = await ipc.spawnTerminal(path ?? undefined, term.rows, term.cols);
+            await setupSession(sessionId, shellName);
           }
         })
         .catch((err) => {
@@ -800,9 +803,6 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
           onAliveChange?.(false);
         });
     });
-
-    let unlistenOutputFn: (() => void) | null = null;
-    let unlistenExitFn: (() => void) | null = null;
 
     // Handle resize: fit immediately (prevents font stretching),
     // debounce PTY notification so CLI apps reflow once after drag ends (avoids

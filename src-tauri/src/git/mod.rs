@@ -18,6 +18,12 @@ pub struct GitFileStatus {
 }
 
 #[derive(Debug, Serialize, Clone)]
+pub struct GitStatusResult {
+    pub entries: Vec<GitFileStatus>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Serialize, Clone)]
 pub struct GitBranchInfo {
     pub name: String,
     pub remote: Option<String>,
@@ -48,7 +54,7 @@ fn is_skip_dir(name: &str) -> bool {
     SKIP_DIRS.iter().any(|d| *d == name)
 }
 
-pub fn status(project_path: &str) -> AppResult<Vec<GitFileStatus>> {
+pub fn status(project_path: &str) -> AppResult<GitStatusResult> {
     let repo = Repository::open(project_path)?;
     let mut opts = StatusOptions::new();
     opts.include_untracked(true)
@@ -57,9 +63,11 @@ pub fn status(project_path: &str) -> AppResult<Vec<GitFileStatus>> {
 
     let statuses = repo.statuses(Some(&mut opts))?;
     let mut result = Vec::new();
+    let mut truncated = false;
 
     for entry in statuses.iter() {
         if result.len() >= MAX_STATUS_ENTRIES {
+            truncated = true;
             break;
         }
 
@@ -106,6 +114,7 @@ pub fn status(project_path: &str) -> AppResult<Vec<GitFileStatus>> {
         }
 
         if result.len() >= MAX_STATUS_ENTRIES {
+            truncated = true;
             break;
         }
 
@@ -128,7 +137,10 @@ pub fn status(project_path: &str) -> AppResult<Vec<GitFileStatus>> {
         }
     }
 
-    Ok(result)
+    Ok(GitStatusResult {
+        entries: result,
+        truncated,
+    })
 }
 
 pub fn diff_workdir(project_path: &str) -> AppResult<String> {

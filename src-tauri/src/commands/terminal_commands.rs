@@ -239,6 +239,54 @@ pub fn claim_warmup_terminal(
     Ok(Some((session_id, shell_name)))
 }
 
+/// Flush buffered output and enable direct event emission for this session.
+/// Must be called after the frontend has registered its event listeners.
+#[tauri::command]
+pub fn terminal_subscribe(
+    app: AppHandle,
+    state: State<TerminalState>,
+    session_id: String,
+) -> AppResult<()> {
+    use crate::terminal::PendingItem;
+    use tauri::Emitter;
+
+    let sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
+    if let Some(session) = sessions.get(&session_id) {
+        let output_event = format!("terminal-output-{}", session_id);
+        let exit_event = format!("terminal-exit-{}", session_id);
+
+        let (combined, has_exit) = {
+            let mut buf = session
+                .pending_output
+                .lock()
+                .map_err(|_| AppError::General("pending_output lock poisoned".to_string()))?;
+            let mut output = String::new();
+            let mut exited = false;
+            for item in buf.drain(..) {
+                match item {
+                    PendingItem::Output(s) => output.push_str(&s),
+                    PendingItem::Exited => exited = true,
+                }
+            }
+            session
+                .subscribed
+                .store(true, std::sync::atomic::Ordering::Release);
+            (output, exited)
+        };
+
+        if !combined.is_empty() {
+            let _ = app.emit(&output_event, &combined);
+        }
+        if has_exit {
+            let _ = app.emit(&exit_event, &session_id);
+        }
+    }
+    Ok(())
+}
+
 /// Build a cd + clear command appropriate for the given shell.
 fn build_cd_command(shell_name: &str, path: &str) -> String {
     match shell_name {

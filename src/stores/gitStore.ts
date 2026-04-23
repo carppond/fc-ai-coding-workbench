@@ -64,6 +64,7 @@ function snapshotRepoState(s: GitState): RepoGitState {
 
 interface GitState {
   fileStatuses: GitFileStatus[];
+  statusTruncated: boolean;
   branchInfo: GitBranchInfo | null;
   logEntries: GitLogEntry[];
   branches: BranchListItem[];
@@ -133,6 +134,7 @@ let refreshController: AbortController | null = null;
 
 export const useGitStore = create<GitState>((set, get) => ({
   fileStatuses: [],
+  statusTruncated: false,
   branchInfo: null,
   logEntries: [],
   branches: [],
@@ -165,11 +167,14 @@ export const useGitStore = create<GitState>((set, get) => ({
     set({ loading: true });
 
     let statuses: GitFileStatus[] = [];
+    let statusTruncated = false;
     let branch: GitBranchInfo | null = null;
     let isGitRepo = false;
 
     try {
-      statuses = await ipc.gitStatus(projectPath);
+      const result = await ipc.gitStatus(projectPath);
+      statuses = result.entries;
+      statusTruncated = result.truncated;
       isGitRepo = true;
     } catch {
       // Not a git repo or other error
@@ -185,7 +190,7 @@ export const useGitStore = create<GitState>((set, get) => ({
 
     if (signal.aborted) return;
 
-    set({ fileStatuses: statuses, branchInfo: branch, isGitRepo, loading: false });
+    set({ fileStatuses: statuses, statusTruncated, branchInfo: branch, isGitRepo, loading: false });
 
     // 同步到 repoStates
     set((s) => ({
@@ -271,11 +276,14 @@ export const useGitStore = create<GitState>((set, get) => ({
     if (get().operating) return;
 
     let statuses: GitFileStatus[] = [];
+    let statusTruncated = false;
     let branch: GitBranchInfo | null = null;
     let isGitRepo = false;
 
     try {
-      statuses = await ipc.gitStatus(projectPath);
+      const result = await ipc.gitStatus(projectPath);
+      statuses = result.entries;
+      statusTruncated = result.truncated;
       isGitRepo = true;
     } catch {
       // Not a git repo or other error
@@ -294,7 +302,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     const repoChanged = prev.isGitRepo !== isGitRepo;
     if (statusChanged || branchChanged || repoChanged) {
       const update: Partial<GitState> = {};
-      if (statusChanged) update.fileStatuses = statuses;
+      if (statusChanged) { update.fileStatuses = statuses; update.statusTruncated = statusTruncated; }
       if (branchChanged) update.branchInfo = branch;
       if (repoChanged) update.isGitRepo = isGitRepo;
       set(update);
@@ -739,6 +747,7 @@ export const useGitStore = create<GitState>((set, get) => ({
       diffStagedText: "",
       selectedFile: null,
       selectedFileDiff: "",
+      statusTruncated: false,
       loading: false,
       operating: false,
       operationType: null,
@@ -761,7 +770,8 @@ export const useGitStore = create<GitState>((set, get) => ({
     let isGitRepo = false;
 
     try {
-      statuses = await ipc.gitStatus(projectPath);
+      const result = await ipc.gitStatus(projectPath);
+      statuses = result.entries;
       isGitRepo = true;
     } catch { /* not a git repo */ }
 
@@ -861,12 +871,13 @@ async function _refreshAfterFileOp(
   get: () => GitState,
 ) {
   try {
-    const [statuses, diff, diffStaged] = await Promise.all([
+    const [statusResult, diff, diffStaged] = await Promise.all([
       ipc.gitStatus(projectPath),
       ipc.gitDiff(projectPath),
       ipc.gitDiffStaged(projectPath),
     ]);
-    set({ fileStatuses: statuses, diffText: diff, diffStagedText: diffStaged });
+    const statuses = statusResult.entries;
+    set({ fileStatuses: statuses, statusTruncated: statusResult.truncated, diffText: diff, diffStagedText: diffStaged });
 
     // 同步 status 到 repoStates
     const prev = get().repoStates[projectPath] || makeEmptyRepoState();

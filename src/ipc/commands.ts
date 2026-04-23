@@ -6,7 +6,7 @@ import type {
   Thread,
   Message,
   DirEntry,
-  GitFileStatus,
+  GitStatusResult,
   GitLogEntry,
   GitBranchInfo,
   BranchListItem,
@@ -200,7 +200,7 @@ export const testApiKey = (
 // --- Git ---
 
 export const gitStatus = (projectPath: string) =>
-  invoke<GitFileStatus[]>("git_status", { projectPath });
+  invoke<GitStatusResult>("git_status", { projectPath });
 
 export const gitDiff = (projectPath: string) =>
   invoke<string>("git_diff", { projectPath });
@@ -408,3 +408,6 @@ export const warmupTerminal = (initialDir?: string) =>
 
 export const claimWarmupTerminal = (initialDir?: string, rows?: number, cols?: number) =>
   invoke<[string, string] | null>("claim_warmup_terminal", { initialDir, rows, cols });
+
+export const terminalSubscribe = (sessionId: string) =>
+  invoke<void>("terminal_subscribe", { sessionId });

@@ -2,7 +2,7 @@ use crate::errors::AppResult;
 use crate::git;
 
 #[tauri::command]
-pub async fn git_status(project_path: String) -> AppResult<Vec<git::GitFileStatus>> {
+pub async fn git_status(project_path: String) -> AppResult<git::GitStatusResult> {
     git::status(&project_path)
 }
 

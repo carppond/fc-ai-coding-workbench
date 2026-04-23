@@ -68,15 +68,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
       content: m.content,
     }));
 
-    // Set up streaming listener
+    // Set up streaming listener with batched state updates
     let accumulated = "";
+    let batchTimer: ReturnType<typeof setTimeout> | null = null;
+    const flushBatch = () => {
+      batchTimer = null;
+      set({ streamingContent: accumulated, status: "streaming" });
+    };
     const unlisten = await listen<StreamChunk>(`stream-chunk-${threadId}`, (event) => {
       const chunk = event.payload;
       if (chunk.error) {
+        if (batchTimer) { clearTimeout(batchTimer); batchTimer = null; }
         set({ status: "error", error: chunk.error, streamingContent: accumulated });
         return;
       }
       if (chunk.done) {
+        if (batchTimer) { clearTimeout(batchTimer); batchTimer = null; }
         // Save assistant message to DB
         if (accumulated) {
           ipc
@@ -98,7 +105,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         return;
       }
       accumulated += chunk.delta;
-      set({ streamingContent: accumulated, status: "streaming" });
+      if (!batchTimer) {
+        batchTimer = setTimeout(flushBatch, 150);
+      }
     });
 
     set({ unlistenFn: unlisten, status: "streaming" });

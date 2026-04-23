@@ -64,10 +64,11 @@ pub async fn send_message(
 ) -> AppResult<()> {
     let api_key = crate::keychain::get_api_key(&provider)?;
 
-    // Create cancel token
+    // Create cancel token; purge any stale tokens from previous sessions
     let (tx, rx) = tokio::sync::watch::channel(false);
     {
         let mut tokens = state.cancel_tokens.lock().unwrap();
+        tokens.retain(|_, t| !t.is_closed());
         tokens.insert(thread_id.clone(), tx);
     }
 

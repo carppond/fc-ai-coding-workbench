@@ -24,7 +24,13 @@ impl AppState {
 
         let db_path = app_dir.join("workbench.db");
         let mut conn = Connection::open(db_path)?;
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL; \
+             PRAGMA foreign_keys=ON; \
+             PRAGMA synchronous=NORMAL; \
+             PRAGMA cache_size=-8000; \
+             PRAGMA temp_store=MEMORY;",
+        )?;
         migrations::run_migrations(&mut conn)?;
 
         // 读取代理设置并初始化全局代理状态（轻量操作，不构建 client）

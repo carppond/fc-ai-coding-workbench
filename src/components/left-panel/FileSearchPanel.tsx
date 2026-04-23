@@ -1,10 +1,12 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Search, FileText } from "lucide-react";
 import { useProjectStore } from "../../stores/projectStore";
 import { useFileStore } from "../../stores/fileStore";
 import { useI18n } from "../../lib/i18n";
 import * as ipc from "../../ipc/commands";
 import type { FileSearchResult } from "../../ipc/commands";
+
+const DISPLAY_LIMIT = 50;
 
 export function FileSearchPanel() {
   const { activeProject } = useProjectStore();
@@ -13,6 +15,7 @@ export function FileSearchPanel() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<FileSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
+  const [displayCount, setDisplayCount] = useState(DISPLAY_LIMIT);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevProjectRef = useRef<string | null>(null);
 
@@ -39,6 +42,7 @@ export function FileSearchPanel() {
       try {
         const res = await ipc.searchInFiles(activeProject.path, query.trim());
         setResults(res);
+        setDisplayCount(DISPLAY_LIMIT);
       } catch {
         setResults([]);
       }
@@ -50,20 +54,6 @@ export function FileSearchPanel() {
     };
   }, [query, activeProject?.path]);
 
-  // Group results by file
-  const grouped = useMemo(() => {
-    const map = new Map<string, FileSearchResult[]>();
-    for (const r of results) {
-      const existing = map.get(r.path);
-      if (existing) {
-        existing.push(r);
-      } else {
-        map.set(r.path, [r]);
-      }
-    }
-    return map;
-  }, [results]);
-
   const handleResultClick = (result: FileSearchResult) => {
     if (!activeProject) return;
     const absPath = activeProject.path + "/" + result.path;
@@ -71,6 +61,19 @@ export function FileSearchPanel() {
   };
 
   const trimmedQuery = query.trim();
+
+  const visibleResults = useMemo(() => results.slice(0, displayCount), [results, displayCount]);
+  const visibleGrouped = useMemo(() => {
+    const map = new Map<string, FileSearchResult[]>();
+    for (const r of visibleResults) {
+      const existing = map.get(r.path);
+      if (existing) existing.push(r);
+      else map.set(r.path, [r]);
+    }
+    return map;
+  }, [visibleResults]);
+  const hasMore = results.length > displayCount;
+  const showMore = useCallback(() => setDisplayCount((c) => c + DISPLAY_LIMIT), []);
 
   return (
     <div className="file-search-panel">
@@ -97,7 +100,7 @@ export function FileSearchPanel() {
           </div>
         )}
 
-        {Array.from(grouped.entries()).map(([filePath, fileResults]) => (
+        {Array.from(visibleGrouped.entries()).map(([filePath, fileResults]) => (
           <div key={filePath} className="file-search-panel__file-group">
             <div className="file-search-panel__file-header">
               <FileText size={12} />
@@ -117,6 +120,12 @@ export function FileSearchPanel() {
             ))}
           </div>
         ))}
+
+        {hasMore && (
+          <button className="file-search-panel__show-more" onClick={showMore}>
+            {t("fileSearch.showMore") ?? `Show more (${results.length - displayCount} remaining)`}
+          </button>
+        )}
       </div>
     </div>
   );

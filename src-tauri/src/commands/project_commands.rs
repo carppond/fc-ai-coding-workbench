@@ -327,16 +327,24 @@ pub async fn write_file_content(path: String, content: String) -> AppResult<()> 
 
 /// 列出项目下所有文件的相对路径（用于快速打开）
 #[tauri::command]
-pub async fn list_all_files(project_path: String) -> AppResult<Vec<String>> {
+pub async fn list_all_files(project_path: String, max_depth: Option<usize>) -> AppResult<Vec<String>> {
     let root = std::path::Path::new(&project_path);
+    let depth_limit = max_depth.unwrap_or(20);
+    const MAX_FILES: usize = 10_000;
     let mut files = Vec::new();
 
-    fn walk(dir: &std::path::Path, root: &std::path::Path, files: &mut Vec<String>) {
+    fn walk(dir: &std::path::Path, root: &std::path::Path, files: &mut Vec<String>, depth: usize, max_depth: usize) {
+        if depth >= max_depth || files.len() >= MAX_FILES {
+            return;
+        }
         let read_dir = match std::fs::read_dir(dir) {
             Ok(rd) => rd,
             Err(_) => return,
         };
         for entry in read_dir.filter_map(|e| e.ok()) {
+            if files.len() >= MAX_FILES {
+                return;
+            }
             let name = entry.file_name().to_string_lossy().to_string();
             if SKIP_DIRS.contains(&name.as_str()) || name.starts_with('.') {
                 continue;
@@ -344,16 +352,14 @@ pub async fn list_all_files(project_path: String) -> AppResult<Vec<String>> {
             let path = entry.path();
             let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
             if is_dir {
-                walk(&path, root, files);
-            } else {
-                if let Ok(rel) = path.strip_prefix(root) {
-                    files.push(rel.to_string_lossy().to_string());
-                }
+                walk(&path, root, files, depth + 1, max_depth);
+            } else if let Ok(rel) = path.strip_prefix(root) {
+                files.push(rel.to_string_lossy().to_string());
             }
         }
     }
 
-    walk(root, root, &mut files);
+    walk(root, root, &mut files, 0, depth_limit);
     files.sort();
     Ok(files)
 }

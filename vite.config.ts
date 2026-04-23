@@ -6,6 +6,14 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react()],
   clearScreen: false,
+  build: {
+    minify: "terser",
+    terserOptions: {
+      mangle: {
+        safari10: true,
+      },
+    },
+  },
   server: {
     port: 1420,
     strictPort: true,

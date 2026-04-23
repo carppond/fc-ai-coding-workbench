@@ -63,6 +63,11 @@ export interface GitFileStatus {
   staged: boolean;
 }
 
+export interface GitStatusResult {
+  entries: GitFileStatus[];
+  truncated: boolean;
+}
+
 export interface GitLogEntry {
   hash: string;
   message: string;

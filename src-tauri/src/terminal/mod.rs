@@ -1,8 +1,14 @@
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use std::io::{Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc as std_mpsc;
 use tauri::Emitter;
+
+pub enum PendingItem {
+    Output(String),
+    Exited,
+}
 
 /// Find the last valid UTF-8 boundary in a byte slice.
 /// Returns (valid_bytes, leftover_bytes) where leftover_bytes is the count
@@ -55,17 +61,18 @@ pub struct TerminalSession {
     write_tx: std_mpsc::Sender<String>,
     master: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
     child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,
-    alive: Arc<std::sync::atomic::AtomicBool>,
+    alive: Arc<AtomicBool>,
     pub id: String,
     pub shell_name: String,
+    pub pending_output: Arc<Mutex<Vec<PendingItem>>>,
+    pub subscribed: Arc<AtomicBool>,
 }
 
 impl Drop for TerminalSession {
     fn drop(&mut self) {
-        self.alive.store(false, std::sync::atomic::Ordering::Relaxed);
+        self.alive.store(false, Ordering::Relaxed);
         if let Ok(mut child) = self.child.lock() {
             let _ = child.kill();
-            // Wait for the child to exit to prevent zombie processes
             let _ = child.wait();
         }
     }
@@ -203,11 +210,54 @@ impl TerminalSession {
             .take_writer()
             .map_err(|e| format!("Failed to take writer: {}", e))?;
 
-        let alive = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let alive = Arc::new(AtomicBool::new(true));
         let alive_clone = alive.clone();
         let exit_session_id = session_id.clone();
         let output_event = format!("terminal-output-{}", session_id);
         let exit_event = format!("terminal-exit-{}", session_id);
+
+        let pending_output: Arc<Mutex<Vec<PendingItem>>> = Arc::new(Mutex::new(Vec::new()));
+        let subscribed = Arc::new(AtomicBool::new(false));
+        let pending_out = pending_output.clone();
+        let sub = subscribed.clone();
+
+        // Auto-subscribe fallback: if the frontend doesn't call terminal_subscribe
+        // within 3 seconds (e.g. due to IPC issues in packaged builds), force-flush
+        // the buffer and switch to direct emission so the terminal doesn't stay stuck.
+        {
+            let auto_app = app.clone();
+            let auto_pending = pending_output.clone();
+            let auto_sub = subscribed.clone();
+            let auto_output_event = output_event.clone();
+            let auto_exit_event = exit_event.clone();
+            let auto_session_id = session_id.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+                if auto_sub.load(Ordering::Acquire) {
+                    return;
+                }
+                let mut buf = auto_pending.lock().unwrap();
+                if auto_sub.load(Ordering::Acquire) {
+                    return;
+                }
+                let mut output = String::new();
+                let mut exited = false;
+                for item in buf.drain(..) {
+                    match item {
+                        PendingItem::Output(s) => output.push_str(&s),
+                        PendingItem::Exited => exited = true,
+                    }
+                }
+                auto_sub.store(true, Ordering::Release);
+                drop(buf);
+                if !output.is_empty() {
+                    let _ = auto_app.emit(&auto_output_event, &output);
+                }
+                if exited {
+                    let _ = auto_app.emit(&auto_exit_event, &auto_session_id);
+                }
+            });
+        }
 
         // Channel for reader → coalescer communication (None = exit signal)
         let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
@@ -215,12 +265,12 @@ impl TerminalSession {
         // Reader thread — reads from PTY, processes UTF-8, sends to coalescer
         std::thread::spawn(move || {
             let mut reader = reader;
-            let mut buf = [0u8; 4096];
+            let mut buf = [0u8; 16384];
             let mut remainder_buf = [0u8; 4];
             let mut remainder_len: usize = 0;
             let mut initial_phase = true;
             let mut chunks_seen = 0u32;
-            let mut combined = [0u8; 4 + 4096];
+            let mut combined = [0u8; 4 + 16384];
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => {
@@ -290,11 +340,37 @@ impl TerminalSession {
             }
         });
 
-        // Coalescer thread — batches output with a 2ms window to reduce IPC events
+        // Coalescer thread — batches output with a 2ms window to reduce IPC events.
+        // Before the frontend subscribes, output is buffered in pending_out.
         std::thread::spawn(move || {
             use std::sync::mpsc::RecvTimeoutError;
             use std::time::{Duration, Instant};
-            let coalesce = Duration::from_millis(2);
+            let coalesce = Duration::from_millis(5);
+            const MAX_PENDING: usize = 10_000;
+
+            let emit_or_buffer = |batch: String| {
+                let subscribed = sub.load(Ordering::Acquire);
+                let mut buf = pending_out.lock().unwrap();
+                if subscribed {
+                    drop(buf);
+                    let _ = app.emit(&output_event, &batch);
+                } else {
+                    if buf.len() < MAX_PENDING {
+                        buf.push(PendingItem::Output(batch));
+                    }
+                }
+            };
+
+            let handle_exit = || {
+                alive_clone.store(false, Ordering::Relaxed);
+                let mut buf = pending_out.lock().unwrap();
+                if sub.load(Ordering::Acquire) {
+                    drop(buf);
+                    let _ = app.emit(&exit_event, &exit_session_id);
+                } else {
+                    buf.push(PendingItem::Exited);
+                }
+            };
 
             loop {
                 match rx.recv() {
@@ -310,35 +386,27 @@ impl TerminalSession {
                             match rx.recv_timeout(remaining) {
                                 Ok(Some(more)) => batch.push_str(&more),
                                 Ok(None) => {
-                                    // Exit — flush remaining data first
                                     if !batch.is_empty() {
-                                        let _ = app.emit(&output_event, &batch);
+                                        emit_or_buffer(batch);
                                     }
-                                    alive_clone.store(
-                                        false,
-                                        std::sync::atomic::Ordering::Relaxed,
-                                    );
-                                    let _ =
-                                        app.emit(&exit_event, &exit_session_id);
+                                    handle_exit();
                                     return;
                                 }
                                 Err(RecvTimeoutError::Timeout) => break,
                                 Err(RecvTimeoutError::Disconnected) => {
                                     if !batch.is_empty() {
-                                        let _ = app.emit(&output_event, &batch);
+                                        emit_or_buffer(batch);
                                     }
                                     return;
                                 }
                             }
                         }
                         if !batch.is_empty() {
-                            let _ = app.emit(&output_event, &batch);
+                            emit_or_buffer(batch);
                         }
                     }
                     Ok(None) => {
-                        alive_clone
-                            .store(false, std::sync::atomic::Ordering::Relaxed);
-                        let _ = app.emit(&exit_event, &exit_session_id);
+                        handle_exit();
                         return;
                     }
                     Err(_) => return,
@@ -363,6 +431,8 @@ impl TerminalSession {
             alive,
             id: session_id,
             shell_name: shell_name.clone(),
+            pending_output,
+            subscribed,
         })
     }
 

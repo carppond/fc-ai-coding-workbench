@@ -7,10 +7,10 @@ import { useI18n } from "../../lib/i18n";
 import { useConfirm } from "../common/ConfirmDialog";
 
 const VISIBLE_LIMIT = 100;
-const MAX_STATUS_ENTRIES = 500;
 
 export function GitStatusList() {
   const fileStatuses = useGitStore((s) => s.fileStatuses);
+  const isTruncated = useGitStore((s) => s.statusTruncated);
   const selectedFile = useGitStore((s) => s.selectedFile);
   const selectFile = useGitStore((s) => s.selectFile);
   const stageFile = useGitStore((s) => s.stageFile);
@@ -34,7 +34,6 @@ export function GitStatusList() {
   const conflicted = useMemo(() => fileStatuses.filter((f) => f.status === "conflicted"), [fileStatuses]);
   const staged = useMemo(() => fileStatuses.filter((f) => f.staged && f.status !== "conflicted"), [fileStatuses]);
   const unstaged = useMemo(() => fileStatuses.filter((f) => !f.staged && f.status !== "conflicted"), [fileStatuses]);
-  const isTruncated = fileStatuses.length >= MAX_STATUS_ENTRIES;
 
   const visibleStaged = expandedStaged ? staged : staged.slice(0, VISIBLE_LIMIT);
   const visibleUnstaged = expandedUnstaged ? unstaged : unstaged.slice(0, VISIBLE_LIMIT);
@@ -304,7 +303,7 @@ export function GitStatusList() {
       )}
       {isTruncated && (
         <div style={{ padding: "6px 10px", fontSize: 11, color: "var(--warning)", fontStyle: "italic" }}>
-          {t("git.truncated").replace("{count}", String(MAX_STATUS_ENTRIES))}
+          {t("git.truncated").replace("{count}", "500")}
         </div>
       )}
     </div>

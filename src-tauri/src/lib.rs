@@ -149,6 +149,7 @@ pub fn run() {
             commands::terminal_commands::is_terminal_idle,
             commands::terminal_commands::warmup_terminal,
             commands::terminal_commands::claim_warmup_terminal,
+            commands::terminal_commands::terminal_subscribe,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
