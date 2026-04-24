@@ -460,7 +460,11 @@ export function CenterPanel() {
 
     const onMove = (ev: MouseEvent) => {
       const delta = (vertical ? ev.clientY : ev.clientX) - startPos;
-      const newSize1 = Math.max(60, Math.min(total - 60, size1 + delta));
+      // Floor of 120px — ~5 rows at default font. Smaller and TUI apps
+      // (claude CLI, vim) can't render their UI. xterm will still scrollback
+      // for partial views, but the pane stays visible and usable.
+      const MIN_PANE = 120;
+      const newSize1 = Math.max(MIN_PANE, Math.min(total - MIN_PANE, size1 + delta));
       const ratio = newSize1 / total;
       child1.style.flex = String(ratio);
       child2.style.flex = String(1 - ratio);
@@ -491,9 +495,16 @@ export function CenterPanel() {
           return { ...tab, layout: newLayout };
         }));
       }
+      // Force every Terminal to re-fit + re-sync PTY after React commits the
+      // final ratio. rAF lets React flush the re-render first so xterm reads
+      // the authoritative container size, not a 1px-off live-drag value.
+      requestAnimationFrame(() => {
+        window.dispatchEvent(new Event("terminal-drag-end"));
+      });
     };
     document.body.style.cursor = vertical ? "row-resize" : "col-resize";
     document.body.style.userSelect = "none";
+    window.dispatchEvent(new Event("terminal-drag-start"));
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
   }, []);

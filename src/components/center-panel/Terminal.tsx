@@ -804,39 +804,95 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
         });
     });
 
-    // Handle resize: fit immediately (prevents font stretching),
-    // debounce PTY notification so CLI apps reflow once after drag ends (avoids
-    // intermediate SIGWINCH causing rendering artifacts in TUI apps like Claude CLI)
+    // Resize strategy: during a drag, DO NOT fit xterm and DO NOT resize PTY.
+    // Both are frozen at their pre-drag dimensions. This keeps xterm, PTY, and
+    // the CLI's idea of window size in perfect lockstep — the shell echoes
+    // using the same cols it renders into, so input never offsets. Visually,
+    // characters may look slightly stretched/squeezed while you drag, but they
+    // snap to the correct layout on mouseup. For TUI apps (vim, claude), they
+    // receive exactly ONE SIGWINCH after the drag settles, not ~60/sec, so full
+    // -screen redraws always complete cleanly without tearing or garbage.
+    //
+    // For non-drag resizes (startup reflow, window resize, font-size change),
+    // the ResizeObserver fires rapidly while layout animates; we fit xterm on
+    // every frame but DEBOUNCE the PTY SIGWINCH 150ms so the shell only sees
+    // the final size.
+    //
+    // PTY has a floor of VT100 (24x80) — even if the pane is squeezed tiny,
+    // the shell still renders into 24x80; xterm shows a partial view with
+    // scrollback. This keeps TUI apps usable at any pane size.
+    let isDragging = false;
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
     let lastCols = term.cols;
     let lastRows = term.rows;
+    const MIN_PTY_ROWS = 24;
+    const MIN_PTY_COLS = 80;
     const notifyPtyResize = () => {
       if (disposed) return;
-      const newCols = term.cols;
-      const newRows = term.rows;
+      const newCols = Math.max(MIN_PTY_COLS, term.cols);
+      const newRows = Math.max(MIN_PTY_ROWS, term.rows);
       if (newCols !== lastCols || newRows !== lastRows) {
         lastCols = newCols;
         lastRows = newRows;
         if (sessionIdRef.current) {
-          ipc.resizeTerminal(sessionIdRef.current, newRows, newCols);
+          ipc.resizeTerminal(sessionIdRef.current, newRows, newCols).catch(() => { /* ignore */ });
         }
       }
     };
     const onResize = () => {
-      // Skip resize when terminal is hidden — no point fitting an invisible container
+      if (isDragging) return;
       if (!visibleRef.current) return;
-      // 跳过 0 尺寸容器（portal host 在 reparenting 期间会短暂脱离 DOM）
       if (container.clientWidth === 0 || container.clientHeight === 0) return;
-      // Fit immediately so characters never appear stretched
       safeFit();
-      // Debounce PTY resize: only notify after resize settles, so CLI apps
-      // receive a single SIGWINCH and produce one clean reflow
       if (resizeTimer) clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(notifyPtyResize, 100);
+      resizeTimer = setTimeout(() => {
+        notifyPtyResize();
+        if (!disposed) {
+          try { term.refresh(0, term.rows - 1); } catch { /* ignore */ }
+        }
+      }, 150);
     };
 
+    // drag-end PTY sync is debounced so rapid repeated drags produce one
+    // SIGWINCH — TUI apps (Claude CLI, vim) redraw on every SIGWINCH, and
+    // Claude CLI's ink renderer re-prints its banner into the primary screen
+    // rather than using an alt-screen buffer, so each extra SIGWINCH leaves a
+    // duplicate banner in scrollback. Coalescing to one SIGWINCH per settle
+    // minimizes this artifact.
+    let dragEndTimer: ReturnType<typeof setTimeout> | null = null;
+    const onDragStart = () => {
+      isDragging = true;
+      if (dragEndTimer) { clearTimeout(dragEndTimer); dragEndTimer = null; }
+    };
+    const onDragEnd = () => {
+      isDragging = false;
+      if (disposed) return;
+      if (!visibleRef.current) return;
+      if (container.clientWidth === 0 || container.clientHeight === 0) return;
+      if (dragEndTimer) clearTimeout(dragEndTimer);
+      // Fit xterm immediately for crisp visual snap, but debounce the PTY sync
+      try { fitAddon.fit(); } catch { /* container not ready */ }
+      dragEndTimer = setTimeout(() => {
+        dragEndTimer = null;
+        if (disposed || !visibleRef.current) return;
+        if (container.clientWidth === 0 || container.clientHeight === 0) return;
+        notifyPtyResize();
+        try { term.refresh(0, term.rows - 1); } catch { /* ignore */ }
+      }, 180);
+    };
+    window.addEventListener("terminal-drag-start", onDragStart);
+    window.addEventListener("terminal-drag-end", onDragEnd);
+
+    // Defer onResize to next frame to avoid "ResizeObserver loop completed with
+    // undelivered notifications" warnings when fit() mutates layout inside the
+    // observer callback.
+    let observerRafId: number | null = null;
     const resizeObserver = new ResizeObserver(() => {
-      onResize();
+      if (observerRafId != null) return;
+      observerRafId = requestAnimationFrame(() => {
+        observerRafId = null;
+        onResize();
+      });
     });
     resizeObserver.observe(container);
 
@@ -846,6 +902,8 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
       resizeObserver.disconnect();
       container.removeEventListener("paste", handlePaste, true);
       container.removeEventListener("contextmenu", handleContextMenu);
+      window.removeEventListener("terminal-drag-start", onDragStart);
+      window.removeEventListener("terminal-drag-end", onDragEnd);
       if (resizeTimer) clearTimeout(resizeTimer);
       if (unlistenOutputFn) unlistenOutputFn();
       if (unlistenExitFn) unlistenExitFn();

@@ -58,7 +58,16 @@ export function AppShell() {
     <div className="app-shell">
       <TopBar />
       <div className="app-shell__content">
-        <Allotment>
+        <Allotment
+          onDragStart={() => {
+            window.dispatchEvent(new Event("terminal-drag-start"));
+          }}
+          onDragEnd={() => {
+            requestAnimationFrame(() => {
+              window.dispatchEvent(new Event("terminal-drag-end"));
+            });
+          }}
+        >
           <Allotment.Pane preferredSize={280} minSize={200} maxSize={400}>
             <LeftPanel />
           </Allotment.Pane>
