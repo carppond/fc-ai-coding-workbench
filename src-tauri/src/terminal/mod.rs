@@ -305,7 +305,10 @@ impl TerminalSession {
                             continue;
                         }
 
-                        // Initial phase: filter "Last login:" lines
+                        // Initial phase: filter "Last login:" lines only.
+                        // Do NOT drop chunks that are only whitespace/ANSI-escapes —
+                        // those carry clear-screen, cursor-move, color-reset sequences
+                        // that TUI apps (vim, claude, ink) rely on for correct layout.
                         if initial_phase {
                             chunks_seen += 1;
                             if chunks_seen > 5 {
@@ -322,10 +325,10 @@ impl TerminalSession {
                                     })
                                     .collect::<Vec<_>>()
                                     .join("\n");
-                                if !filtered.trim().is_empty() {
+                                if !filtered.is_empty() {
                                     let _ = tx.send(Some(filtered));
                                 }
-                            } else if !data.trim().is_empty() {
+                            } else {
                                 let _ = tx.send(Some(data));
                             }
                         } else {
@@ -349,8 +352,11 @@ impl TerminalSession {
             const MAX_PENDING: usize = 10_000;
 
             let emit_or_buffer = |batch: String| {
-                let subscribed = sub.load(Ordering::Acquire);
+                // Lock FIRST, then re-check subscribed — avoids a TOCTOU race with
+                // terminal_subscribe: if we loaded subscribed=false before subscribe
+                // ran drain+flip+unlock, pushing to buf would orphan the data.
                 let mut buf = pending_out.lock().unwrap();
+                let subscribed = sub.load(Ordering::Acquire);
                 if subscribed {
                     drop(buf);
                     let _ = app.emit(&output_event, &batch);
@@ -363,8 +369,10 @@ impl TerminalSession {
 
             let handle_exit = || {
                 alive_clone.store(false, Ordering::Relaxed);
+                // Same lock-first ordering as emit_or_buffer to avoid the TOCTOU race
                 let mut buf = pending_out.lock().unwrap();
-                if sub.load(Ordering::Acquire) {
+                let subscribed = sub.load(Ordering::Acquire);
+                if subscribed {
                     drop(buf);
                     let _ = app.emit(&exit_event, &exit_session_id);
                 } else {
