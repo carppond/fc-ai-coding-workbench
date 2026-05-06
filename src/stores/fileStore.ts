@@ -2,9 +2,18 @@ import { create } from "zustand";
 import type { DirEntry } from "../lib/types";
 import * as ipc from "../ipc/commands";
 
+/** 统一路径分隔符为 /（兼容 Windows 反斜杠） */
+function normSep(p: string): string {
+  return p.replace(/\\/g, "/");
+}
+
 /* ── 辅助：找到绝对路径所属的项目根 ── */
 function findRootPath(trees: Record<string, DirEntry[]>, path: string): string | undefined {
-  return Object.keys(trees).find((rp) => path === rp || path.startsWith(rp + "/"));
+  const np = normSep(path);
+  return Object.keys(trees).find((rp) => {
+    const nrp = normSep(rp);
+    return np === nrp || np.startsWith(nrp + "/");
+  });
 }
 
 /* ── 辅助：在条目树中递归查找节点 ── */
@@ -182,7 +191,7 @@ export const useFileStore = create<FileState>((set, get) => ({
         // 刷新该项目下所有已展开的子目录
         for (const dirPath of expandedPaths) {
           if (dirPath === rp) continue;
-          if (!dirPath.startsWith(rp + "/")) continue;
+          if (!normSep(dirPath).startsWith(normSep(rp) + "/")) continue;
           try {
             const children = await ipc.readDirectoryChildren(dirPath);
             updatedEntries = updateChildren(updatedEntries, dirPath, children);

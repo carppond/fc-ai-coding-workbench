@@ -403,6 +403,8 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const shellNameRef = useRef<string | null>(null);
+  const lastPtySizeRef = useRef({ cols: 80, rows: 24 });
+  const syncPtySizeRef = useRef<() => void>(() => {});
   // Track latest projectPath via ref so the spawn timer can read it
   const projectPathRef = useRef(projectPath);
   projectPathRef.current = projectPath;
@@ -470,6 +472,7 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
     if (xtermRef.current && fitAddonRef.current) {
       xtermRef.current.options.fontSize = terminalFontSize;
       try { fitAddonRef.current.fit(); } catch { /* 容器不可见 */ }
+      syncPtySizeRef.current();
     }
   }, [terminalFontSize]);
 
@@ -477,6 +480,7 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
     if (xtermRef.current && fitAddonRef.current) {
       xtermRef.current.options.lineHeight = terminalLineHeight;
       try { fitAddonRef.current.fit(); } catch { /* 容器不可见 */ }
+      syncPtySizeRef.current();
     }
   }, [terminalLineHeight]);
 
@@ -515,6 +519,7 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
           /* container not visible yet */
         }
       }
+      syncPtySizeRef.current();
       // visible 变 true 时聚焦（tab 切换 / 首次 mount）
       // 多 pane 时 CenterPanel 会在之后覆盖为正确的 pane
       requestAnimationFrame(() => {
@@ -823,22 +828,23 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
     // scrollback. This keeps TUI apps usable at any pane size.
     let isDragging = false;
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
-    let lastCols = term.cols;
-    let lastRows = term.rows;
     const MIN_PTY_ROWS = 24;
     const MIN_PTY_COLS = 80;
+    lastPtySizeRef.current = { cols: Math.max(MIN_PTY_COLS, term.cols), rows: Math.max(MIN_PTY_ROWS, term.rows) };
     const notifyPtyResize = () => {
       if (disposed) return;
       const newCols = Math.max(MIN_PTY_COLS, term.cols);
       const newRows = Math.max(MIN_PTY_ROWS, term.rows);
-      if (newCols !== lastCols || newRows !== lastRows) {
-        lastCols = newCols;
-        lastRows = newRows;
+      const last = lastPtySizeRef.current;
+      if (newCols !== last.cols || newRows !== last.rows) {
+        last.cols = newCols;
+        last.rows = newRows;
         if (sessionIdRef.current) {
-          ipc.resizeTerminal(sessionIdRef.current, newRows, newCols).catch(() => { /* ignore */ });
+          ipc.resizeTerminal(sessionIdRef.current, newRows, newCols).catch(() => {});
         }
       }
     };
+    syncPtySizeRef.current = notifyPtyResize;
     const onResize = () => {
       if (isDragging) return;
       if (!visibleRef.current) return;
@@ -847,18 +853,12 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
       if (resizeTimer) clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
         notifyPtyResize();
-        if (!disposed) {
-          try { term.refresh(0, term.rows - 1); } catch { /* ignore */ }
-        }
-      }, 150);
+      }, 80);
     };
 
-    // drag-end PTY sync is debounced so rapid repeated drags produce one
-    // SIGWINCH — TUI apps (Claude CLI, vim) redraw on every SIGWINCH, and
-    // Claude CLI's ink renderer re-prints its banner into the primary screen
-    // rather than using an alt-screen buffer, so each extra SIGWINCH leaves a
-    // duplicate banner in scrollback. Coalescing to one SIGWINCH per settle
-    // minimizes this artifact.
+    // Drag lifecycle: freeze during drag, then fit + sync PTY on drag-end.
+    // A short trailing debounce coalesces rapid successive drag-ends so TUI
+    // apps only receive one SIGWINCH per settle.
     let dragEndTimer: ReturnType<typeof setTimeout> | null = null;
     const onDragStart = () => {
       isDragging = true;
@@ -870,15 +870,13 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
       if (!visibleRef.current) return;
       if (container.clientWidth === 0 || container.clientHeight === 0) return;
       if (dragEndTimer) clearTimeout(dragEndTimer);
-      // Fit xterm immediately for crisp visual snap, but debounce the PTY sync
-      try { fitAddon.fit(); } catch { /* container not ready */ }
+      try { fitAddon.fit(); } catch {}
       dragEndTimer = setTimeout(() => {
         dragEndTimer = null;
         if (disposed || !visibleRef.current) return;
         if (container.clientWidth === 0 || container.clientHeight === 0) return;
         notifyPtyResize();
-        try { term.refresh(0, term.rows - 1); } catch { /* ignore */ }
-      }, 180);
+      }, 60);
     };
     window.addEventListener("terminal-drag-start", onDragStart);
     window.addEventListener("terminal-drag-end", onDragEnd);
@@ -905,6 +903,7 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
       window.removeEventListener("terminal-drag-start", onDragStart);
       window.removeEventListener("terminal-drag-end", onDragEnd);
       if (resizeTimer) clearTimeout(resizeTimer);
+      if (dragEndTimer) clearTimeout(dragEndTimer);
       if (unlistenOutputFn) unlistenOutputFn();
       if (unlistenExitFn) unlistenExitFn();
       // Notify parent that session is gone

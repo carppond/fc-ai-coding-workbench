@@ -47,12 +47,13 @@ export function FileTree() {
     if (!activeProject) return { gitStatusMap: map, gitDirtyDirs: dirs };
 
     const projectPath = activeProject.path;
+    const sep = projectPath.includes("\\") ? "\\" : "/";
     for (const status of fileStatuses) {
-      const absPath = projectPath + "/" + status.path;
+      const absPath = projectPath + sep + status.path.replace(/\//g, sep);
       map.set(absPath, status);
       let parent = absPath;
       while (true) {
-        const idx = parent.lastIndexOf("/");
+        const idx = Math.max(parent.lastIndexOf("/"), parent.lastIndexOf("\\"));
         if (idx <= 0) break;
         parent = parent.substring(0, idx);
         if (parent.length <= projectPath.length) {

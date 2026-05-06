@@ -151,8 +151,9 @@ export const FileTreeItem = memo(function FileTreeItem({ entry, depth, defaultEx
     // 多项目模式下，点击文件/目录自动切换源代码管理上下文（不影响终端）
     const { gitContextPath, projects, selectedProjectIds, setGitContext } = useProjectStore.getState();
     if (selectedProjectIds.size > 1) {
+      const normSep = (s: string) => s.replace(/\\/g, "/");
       const ownerProject = projects.find(
-        (p) => selectedProjectIds.has(p.id) && (entry.path === p.path || entry.path.startsWith(p.path + "/")),
+        (p) => selectedProjectIds.has(p.id) && (entry.path === p.path || normSep(entry.path).startsWith(normSep(p.path) + "/")),
       );
       if (ownerProject && ownerProject.path !== gitContextPath) {
         setGitContext(ownerProject.path);
@@ -181,9 +182,8 @@ export const FileTreeItem = memo(function FileTreeItem({ entry, depth, defaultEx
   };
 
   const getParentPath = (filePath: string) => {
-    const parts = filePath.split("/");
-    parts.pop();
-    return parts.join("/");
+    const idx = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
+    return idx > 0 ? filePath.substring(0, idx) : filePath;
   };
 
   const startRename = () => {
@@ -244,13 +244,15 @@ export const FileTreeItem = memo(function FileTreeItem({ entry, depth, defaultEx
     try {
       if (editing === "rename") {
         const parent = getParentPath(entry.path);
-        const newPath = parent + "/" + value;
+        const sep = entry.path.includes("\\") ? "\\" : "/";
+        const newPath = parent + sep + value;
         if (newPath !== entry.path) {
           await ipc.renameEntry(entry.path, newPath);
           refreshParent(parent);
         }
       } else if (editing === "newFile" || editing === "newFolder") {
-        const newPath = entry.path + "/" + value;
+        const sep = entry.path.includes("\\") ? "\\" : "/";
+        const newPath = entry.path + sep + value;
         await ipc.createFileOrDir(newPath, editing === "newFolder");
         refreshParent(entry.path);
       }

@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { GitFork, Loader2, AlertTriangle } from "lucide-react";
 import { useProjectStore } from "../../stores/projectStore";
 import { useGitStore } from "../../stores/gitStore";
@@ -140,8 +140,18 @@ export function RightPanel() {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const focusedRef = useRef(true);
 
+  const projects = useProjectStore((s) => s.projects);
+
   // 源代码管理使用的项目路径：gitContextPath 优先，fallback 到 activeProject
   const effectivePath = gitContextPath ?? activeProject?.path ?? null;
+
+  const effectiveProjectName = useMemo(() => {
+    if (!effectivePath) return null;
+    const proj = projects.find((p) => p.path === effectivePath);
+    if (proj) return proj.name;
+    const idx = Math.max(effectivePath.lastIndexOf("/"), effectivePath.lastIndexOf("\\"));
+    return idx >= 0 ? effectivePath.substring(idx + 1) : effectivePath;
+  }, [effectivePath, projects]);
 
   useEffect(() => {
     reset();
@@ -244,6 +254,9 @@ export function RightPanel() {
       <div className="panel panel--right" style={{ display: "flex", flexDirection: "column" }}>
         <div className="panel__header">
           <span className="panel__header-title">{t("git.title")}</span>
+          {effectiveProjectName && (
+            <span className="panel__header-project" title={effectivePath ?? ""}>{effectiveProjectName}</span>
+          )}
         </div>
         <div className="empty-state">
           <GitFork size={32} className="empty-state__icon" />
@@ -259,6 +272,9 @@ export function RightPanel() {
     <div className="panel panel--right" style={{ display: "flex", flexDirection: "column" }}>
       <div className="panel__header">
         <span className="panel__header-title">{t("git.title")}</span>
+        {effectiveProjectName && (
+          <span className="panel__header-project" title={effectivePath ?? ""}>{effectiveProjectName}</span>
+        )}
       </div>
       <GitOverview />
       <GitStatusList />

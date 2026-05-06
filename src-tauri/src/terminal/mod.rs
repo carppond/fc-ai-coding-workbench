@@ -422,13 +422,31 @@ impl TerminalSession {
             }
         });
 
-        // Writer channel + dedicated writer thread — zero-contention path for input
+        // Writer channel + dedicated writer thread — zero-contention path for input.
+        // Large pastes are chunked to prevent PTY buffer overflow.
+        //   macOS/Linux: 64KB chunks, flush-only — write_all blocks naturally when
+        //                the 64KB kernel pipe buffer is full, so no delay needed.
+        //   Windows:     4KB chunks + 1ms delay — ConPTY silently drops data if fed
+        //                faster than its internal processing can drain.
+        // Normal keystrokes (< chunk_size) skip chunking entirely.
         let (write_tx, write_rx) = std_mpsc::channel::<String>();
         std::thread::spawn(move || {
             let mut writer = writer;
+            let chunk_size: usize = if cfg!(target_os = "windows") { 4096 } else { 65536 };
             for data in write_rx {
-                let _ = writer.write_all(data.as_bytes());
-                let _ = writer.flush();
+                let bytes = data.as_bytes();
+                if bytes.len() > chunk_size {
+                    for chunk in bytes.chunks(chunk_size) {
+                        let _ = writer.write_all(chunk);
+                        let _ = writer.flush();
+                        if cfg!(target_os = "windows") {
+                            std::thread::sleep(std::time::Duration::from_millis(1));
+                        }
+                    }
+                } else {
+                    let _ = writer.write_all(bytes);
+                    let _ = writer.flush();
+                }
             }
         });
 
