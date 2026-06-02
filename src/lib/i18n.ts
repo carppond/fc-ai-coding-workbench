@@ -48,6 +48,9 @@ const translations: Record<Locale, Record<string, string>> = {
     "terminal.restart": "重启终端",
     "terminal.newTab": "新建终端",
     "terminal.launchCC": "开启CC",
+    "terminal.launchCCAcceptEdits": "自动编辑",
+    "terminal.launchCCContinue": "继续上次",
+    "terminal.launchCCResume": "恢复会话",
     "terminal.rename": "重命名",
     "terminal.splitRight": "向右拆分",
     "terminal.splitDown": "向下拆分",
@@ -306,6 +309,9 @@ const translations: Record<Locale, Record<string, string>> = {
     "terminal.scrollback": "回滚行数",
     "terminal.lines": "行",
     "terminal.lineHeight": "行高",
+    "terminal.renderer": "渲染器",
+    "terminal.rendererCanvas": "Canvas（稳定）",
+    "terminal.rendererWebgl": "WebGL（高性能）",
 
     // Shortcuts Reference
     "shortcuts.title": "快捷键",
@@ -402,6 +408,9 @@ const translations: Record<Locale, Record<string, string>> = {
     "terminal.restart": "Restart Terminal",
     "terminal.newTab": "New Terminal",
     "terminal.launchCC": "Launch CC",
+    "terminal.launchCCAcceptEdits": "Auto-Edit",
+    "terminal.launchCCContinue": "Continue",
+    "terminal.launchCCResume": "Resume",
     "terminal.rename": "Rename",
     "terminal.splitRight": "Split Right",
     "terminal.splitDown": "Split Down",
@@ -660,6 +669,9 @@ const translations: Record<Locale, Record<string, string>> = {
     "terminal.scrollback": "Scrollback",
     "terminal.lines": "lines",
     "terminal.lineHeight": "Line Height",
+    "terminal.renderer": "Renderer",
+    "terminal.rendererCanvas": "Canvas (stable)",
+    "terminal.rendererWebgl": "WebGL (fast)",
 
     // Shortcuts Reference
     "shortcuts.title": "Keyboard Shortcuts",

@@ -10,6 +10,8 @@ export type Theme =
   | "monokai" | "rosePine" | "ayuDark" | "everforest"
   | "githubLight" | "solarizedLight";
 
+export type TerminalRenderer = "canvas" | "webgl";
+
 const THEME_ORDER: Theme[] = [
   "mocha", "macchiato", "frappe",
   "dracula", "nord", "tokyoNight", "oneDark", "gruvboxDark",
@@ -28,6 +30,7 @@ interface SettingsState {
   chatFontSize: number;
   terminalScrollback: number;
   terminalLineHeight: number;
+  terminalRenderer: TerminalRenderer;
   onboardingComplete: boolean;
   loading: boolean;
   envCache: EnvCheckResult | null;
@@ -45,6 +48,7 @@ interface SettingsState {
   setChatFontSize: (size: number) => Promise<void>;
   setTerminalScrollback: (lines: number) => Promise<void>;
   setTerminalLineHeight: (height: number) => Promise<void>;
+  setTerminalRenderer: (renderer: TerminalRenderer) => Promise<void>;
   setOnboardingComplete: (complete: boolean) => Promise<void>;
   saveProviders: (providers: ProviderConfig[]) => Promise<void>;
   hasApiKey: (provider: string) => Promise<boolean>;
@@ -64,6 +68,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   chatFontSize: 14,
   terminalScrollback: 5000,
   terminalLineHeight: 1.35,
+  terminalRenderer: "canvas",
   onboardingComplete: false,
   loading: true,
   envCache: null,
@@ -86,7 +91,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   loadSettings: async () => {
     set({ loading: true });
     try {
-      const [providersVal, providerVal, modelVal, modeVal, themeVal, onboardingVal, editorFsVal, terminalFsVal, chatFsVal, scrollbackVal, lineHeightVal] = await Promise.all([
+      const [providersVal, providerVal, modelVal, modeVal, themeVal, onboardingVal, editorFsVal, terminalFsVal, chatFsVal, scrollbackVal, lineHeightVal, rendererVal] = await Promise.all([
         ipc.getSetting("providers"),
         ipc.getSetting("active_provider"),
         ipc.getSetting("active_model"),
@@ -98,6 +103,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         ipc.getSetting("chat_font_size"),
         ipc.getSetting("terminal_scrollback"),
         ipc.getSetting("terminal_line_height"),
+        ipc.getSetting("terminal_renderer"),
       ]);
 
       const theme = (THEME_ORDER.includes(themeVal as Theme) ? themeVal : "mocha") as Theme;
@@ -114,6 +120,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         ? Math.max(1000, Math.min(999999, scrollbackVal)) : 5000;
       const terminalLineHeight = typeof lineHeightVal === "number"
         ? Math.max(1.0, Math.min(2.0, lineHeightVal)) : 1.35;
+      const terminalRenderer: TerminalRenderer = rendererVal === "webgl" ? "webgl" : "canvas";
       document.documentElement.style.setProperty("--chat-font-size", chatFontSize + "px");
 
       set({
@@ -127,6 +134,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         chatFontSize,
         terminalScrollback,
         terminalLineHeight,
+        terminalRenderer,
         onboardingComplete: (onboardingVal as boolean) || false,
         loading: false,
       });
@@ -194,6 +202,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setTerminalLineHeight: async (height) => {
     set({ terminalLineHeight: height });
     await ipc.setSetting("terminal_line_height", height);
+  },
+
+  setTerminalRenderer: async (renderer) => {
+    set({ terminalRenderer: renderer });
+    await ipc.setSetting("terminal_renderer", renderer);
   },
 
   setOnboardingComplete: async (complete) => {

@@ -2739,6 +2739,28 @@
   opacity: 0.7;
 }
 
+/* 自动编辑：描边样式，区别于实心的「开启CC」主按钮 */
+.cc-launch-btn--accept {
+  margin-right: 6px;
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+}
+
+/* 继续上次 / 恢复会话：弱化的次要操作 */
+.cc-launch-btn--ghost {
+  margin-right: 6px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.cc-launch-btn--ghost:hover {
+  opacity: 1;
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
 .panel-tab__label {
   white-space: nowrap;
   overflow: hidden;
@@ -2904,6 +2926,31 @@
 }
 
 /* Terminal inline search bar */
+.terminal-scroll-bottom {
+  position: absolute;
+  bottom: 16px;
+  right: 18px;
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  transition: color 0.15s, background 0.15s;
+}
+
+.terminal-scroll-bottom:hover {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+
 .terminal-search-bar {
   position: absolute;
   top: 4px;

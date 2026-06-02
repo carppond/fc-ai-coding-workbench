@@ -21,7 +21,7 @@ pub fn run() {
             app.manage(app_state);
             app.manage(commands::terminal_commands::TerminalState {
                 sessions: std::sync::Mutex::new(std::collections::HashMap::new()),
-                warmup: std::sync::Arc::new(std::sync::Mutex::new(None)),
+                warmup: std::sync::Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
             });
 
             // 后台清理上次残留的临时文件（不阻塞启动）

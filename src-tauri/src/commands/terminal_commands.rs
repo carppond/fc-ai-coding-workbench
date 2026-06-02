@@ -1,12 +1,43 @@
 use crate::errors::{AppError, AppResult};
 use crate::terminal::TerminalSession;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
+use sysinfo::{Pid, ProcessRefreshKind, RefreshKind, System};
 use tauri::{AppHandle, State};
+
+/// 预热终端池大小：连续开多个 tab / 分屏时也能秒开
+const WARMUP_POOL_SIZE: usize = 3;
 
 pub struct TerminalState {
     pub sessions: Mutex<HashMap<String, TerminalSession>>,
-    pub warmup: Arc<Mutex<Option<TerminalSession>>>,
+    pub warmup: Arc<Mutex<VecDeque<TerminalSession>>>,
+}
+
+/// 跨平台进程检测：枚举 `pid` 的直接子进程。
+/// 返回 (子进程数量, 是否存在命令行包含 "claude" 的子进程)。
+/// 取代旧的 pgrep 实现 —— pgrep 仅 Unix 可用，Windows 上静默失败。
+fn inspect_children(pid: u32) -> (usize, bool) {
+    let sys = System::new_with_specifics(
+        RefreshKind::new().with_processes(ProcessRefreshKind::everything()),
+    );
+    let target = Pid::from_u32(pid);
+    let mut count = 0usize;
+    let mut has_claude = false;
+    for (_, proc_) in sys.processes() {
+        if proc_.parent() == Some(target) {
+            count += 1;
+            // 命令行或进程名包含 "claude" 即判定为 Claude CLI 在运行
+            let in_name = proc_.name().to_string_lossy().to_lowercase().contains("claude");
+            let in_cmd = proc_
+                .cmd()
+                .iter()
+                .any(|s| s.to_string_lossy().to_lowercase().contains("claude"));
+            if in_name || in_cmd {
+                has_claude = true;
+            }
+        }
+    }
+    (count, has_claude)
 }
 
 #[tauri::command]
@@ -81,26 +112,26 @@ pub async fn kill_terminal(
 ) -> AppResult<()> {
     let mut need_wait = false;
 
-    // 检测是否有 claude 在运行，如果有则发 /exit
+    // 检测是否有 claude 在运行，如果有则发 /exit（跨平台，用 sysinfo）
     {
-        let sessions = state
-            .sessions
-            .lock()
-            .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
-        if let Some(session) = sessions.get(&session_id) {
-            if let Some(pid) = session.child_pid() {
-                // pgrep -P <pid> -f claude: 检查子进程命令行是否包含 "claude"
-                let output = std::process::Command::new("pgrep")
-                    .args(["-P", &pid.to_string(), "-f", "claude"])
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::null())
-                    .output();
-
-                if let Ok(o) = output {
-                    if !o.stdout.is_empty() {
-                        let _ = session.write("/exit\r");
-                        need_wait = true;
-                    }
+        // 先取出 pid，释放锁后扫描进程，再短暂持锁写入 /exit
+        let pid = {
+            let sessions = state
+                .sessions
+                .lock()
+                .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
+            sessions.get(&session_id).and_then(|s| s.child_pid())
+        };
+        if let Some(pid) = pid {
+            let (_, has_claude) = inspect_children(pid);
+            if has_claude {
+                let sessions = state
+                    .sessions
+                    .lock()
+                    .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
+                if let Some(session) = sessions.get(&session_id) {
+                    let _ = session.write("/exit\r");
+                    need_wait = true;
                 }
             }
         }
@@ -120,31 +151,26 @@ pub async fn kill_terminal(
     Ok(())
 }
 
-/// 检查终端是否空闲（shell 无子进程）
+/// 检查终端是否空闲（shell 无子进程）。
+/// 用 sysinfo 跨平台枚举子进程，取代仅 Unix 可用的 pgrep。
 #[tauri::command]
 pub fn is_terminal_idle(
     state: State<TerminalState>,
     session_id: String,
 ) -> AppResult<bool> {
-    let sessions = state
-        .sessions
-        .lock()
-        .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
-    let session = sessions
-        .get(&session_id)
-        .ok_or_else(|| AppError::General("session not found".into()))?;
-    let pid = session.child_pid().ok_or_else(|| AppError::General("no pid".into()))?;
-
-    // pgrep -P <pid> 查找子进程，stdout 为空则空闲
-    let output = std::process::Command::new("pgrep")
-        .args(["-P", &pid.to_string()])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output();
-    match output {
-        Ok(o) => Ok(o.stdout.is_empty()),
-        Err(_) => Ok(true), // pgrep 不可用时默认空闲
-    }
+    let pid = {
+        let sessions = state
+            .sessions
+            .lock()
+            .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
+        let session = sessions
+            .get(&session_id)
+            .ok_or_else(|| AppError::General("session not found".into()))?;
+        session.child_pid().ok_or_else(|| AppError::General("no pid".into()))?
+    };
+    // 释放 sessions 锁后再做进程扫描（扫描较慢，避免长时间持锁）
+    let (child_count, _) = inspect_children(pid);
+    Ok(child_count == 0)
 }
 
 #[tauri::command]
@@ -172,26 +198,34 @@ pub async fn warmup_terminal(
     state: State<'_, TerminalState>,
     initial_dir: Option<String>,
 ) -> AppResult<()> {
-    // Skip if a warmup session already exists
-    {
+    // 计算还需预热几个，把池补满到 WARMUP_POOL_SIZE
+    let need = {
         let warmup = state
             .warmup
             .lock()
             .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
-        if warmup.is_some() {
-            return Ok(());
-        }
+        WARMUP_POOL_SIZE.saturating_sub(warmup.len())
+    };
+    if need == 0 {
+        return Ok(());
     }
 
-    // Spawn on a background thread so the command returns immediately
-    let warmup_arc = Arc::clone(&state.warmup);
-    tauri::async_runtime::spawn_blocking(move || {
-        if let Ok(session) = TerminalSession::spawn(app, initial_dir.as_deref(), 24, 80) {
-            if let Ok(mut warmup) = warmup_arc.lock() {
-                *warmup = Some(session);
+    // 每个缺额各起一个后台线程预热，命令立即返回
+    for _ in 0..need {
+        let app = app.clone();
+        let dir = initial_dir.clone();
+        let warmup_arc = Arc::clone(&state.warmup);
+        tauri::async_runtime::spawn_blocking(move || {
+            if let Ok(session) = TerminalSession::spawn(app, dir.as_deref(), 24, 80) {
+                if let Ok(mut warmup) = warmup_arc.lock() {
+                    // 二次确认未超额（并发预热可能多起，超了就丢弃触发 Drop）
+                    if warmup.len() < WARMUP_POOL_SIZE {
+                        warmup.push_back(session);
+                    }
+                }
             }
-        }
-    });
+        });
+    }
 
     Ok(())
 }
@@ -203,13 +237,13 @@ pub fn claim_warmup_terminal(
     rows: Option<u16>,
     cols: Option<u16>,
 ) -> AppResult<Option<(String, String)>> {
-    // Take the warmup session out of the pool
+    // Take a warmup session out of the pool
     let session = {
         let mut warmup = state
             .warmup
             .lock()
             .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
-        warmup.take()
+        warmup.pop_front()
     };
 
     let session = match session {

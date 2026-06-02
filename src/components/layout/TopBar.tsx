@@ -203,8 +203,10 @@ function TerminalSettings() {
   const { t } = useI18n();
   const terminalScrollback = useSettingsStore((s) => s.terminalScrollback);
   const terminalLineHeight = useSettingsStore((s) => s.terminalLineHeight);
+  const terminalRenderer = useSettingsStore((s) => s.terminalRenderer);
   const setTerminalScrollback = useSettingsStore((s) => s.setTerminalScrollback);
   const setTerminalLineHeight = useSettingsStore((s) => s.setTerminalLineHeight);
+  const setTerminalRenderer = useSettingsStore((s) => s.setTerminalRenderer);
 
   const scrollbackOptions = [1000, 3000, 5000, 10000, 20000, 50000, 100000, 500000, 999999];
 
@@ -237,6 +239,19 @@ function TerminalSettings() {
             className="font-settings__slider"
           />
           <span className="font-settings__value">{terminalLineHeight.toFixed(2)}</span>
+        </div>
+      </div>
+      <div className="font-settings__row">
+        <label className="font-settings__label">{t("terminal.renderer")}</label>
+        <div className="font-settings__control">
+          <select
+            className="font-settings__select"
+            value={terminalRenderer}
+            onChange={(e) => setTerminalRenderer(e.target.value as "canvas" | "webgl")}
+          >
+            <option value="canvas">{t("terminal.rendererCanvas")}</option>
+            <option value="webgl">{t("terminal.rendererWebgl")}</option>
+          </select>
         </div>
       </div>
     </div>

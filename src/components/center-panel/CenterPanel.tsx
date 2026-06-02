@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, memo } from "react";
 import { createPortal } from "react-dom";
-import { Plus, X, RotateCw, Sparkles } from "lucide-react";
+import { Plus, X, RotateCw, Sparkles, Zap, Play, History } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useProjectStore } from "../../stores/projectStore";
 import { useFileStore } from "../../stores/fileStore";
@@ -392,8 +392,11 @@ export function CenterPanel() {
     setTabs((prev) => prev.map((tab) => (tab.id === tabId ? { ...tab, title: val } : tab)));
   }, [editValue]);
 
-  /* ── 在当前活跃终端启动 Claude Code ── */
-  const handleLaunchClaude = useCallback(async () => {
+  /* ── 在当前活跃终端启动 Claude Code ──
+   * command 默认 "claude"，传 "claude --permission-mode acceptEdits" 则进入
+   * 自动接受文件编辑模式（仍会确认 Bash 等危险操作）。
+   */
+  const handleLaunchClaude = useCallback(async (command: string = "claude") => {
     if (openFilePath) closeFile();
     const curTab = tabs.find((t) => t.id === activeTabId);
     if (!curTab) return;
@@ -411,7 +414,7 @@ export function CenterPanel() {
       }
     } catch { /* 检查失败时仍允许执行 */ }
 
-    ipc.writeTerminal(sessionId, "claude\r");
+    ipc.writeTerminal(sessionId, `${command}\r`);
     requestAnimationFrame(() => { focusMapRef.current.get(paneId)?.(); });
   }, [activeTabId, tabs, openFilePath, closeFile, getActivePaneId]);
 
@@ -722,11 +725,35 @@ export function CenterPanel() {
           </button>
         )}
 
-        {/* Spacer + Launch Claude Code button */}
+        {/* Spacer + Launch Claude Code buttons */}
         <div style={{ flex: 1 }} />
         <button
+          className="cc-launch-btn cc-launch-btn--ghost"
+          onClick={() => handleLaunchClaude("claude --continue")}
+          title={t("terminal.launchCCContinue")}
+        >
+          <Play size={13} />
+          <span>{t("terminal.launchCCContinue")}</span>
+        </button>
+        <button
+          className="cc-launch-btn cc-launch-btn--ghost"
+          onClick={() => handleLaunchClaude("claude --resume")}
+          title={t("terminal.launchCCResume")}
+        >
+          <History size={13} />
+          <span>{t("terminal.launchCCResume")}</span>
+        </button>
+        <button
+          className="cc-launch-btn cc-launch-btn--accept"
+          onClick={() => handleLaunchClaude("claude --permission-mode acceptEdits")}
+          title={t("terminal.launchCCAcceptEdits")}
+        >
+          <Zap size={13} />
+          <span>{t("terminal.launchCCAcceptEdits")}</span>
+        </button>
+        <button
           className="cc-launch-btn"
-          onClick={handleLaunchClaude}
+          onClick={() => handleLaunchClaude()}
           title={t("terminal.launchCC")}
         >
           <Sparkles size={13} />

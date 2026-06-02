@@ -350,6 +350,9 @@ impl TerminalSession {
             use std::time::{Duration, Instant};
             let coalesce = Duration::from_millis(5);
             const MAX_PENDING: usize = 10_000;
+            // 单批上限 256KB：超大输出（cat 大文件、刷屏日志）立即冲刷，
+            // 避免 batch 在内存里无限增长造成卡顿/内存膨胀（背压保护）。
+            const MAX_BATCH_BYTES: usize = 256 * 1024;
 
             let emit_or_buffer = |batch: String| {
                 // Lock FIRST, then re-check subscribed — avoids a TOCTOU race with
@@ -392,7 +395,13 @@ impl TerminalSession {
                                 break;
                             }
                             match rx.recv_timeout(remaining) {
-                                Ok(Some(more)) => batch.push_str(&more),
+                                Ok(Some(more)) => {
+                                    batch.push_str(&more);
+                                    // 背压：批次过大立即冲刷，不再等满 5ms 窗口
+                                    if batch.len() >= MAX_BATCH_BYTES {
+                                        break;
+                                    }
+                                }
                                 Ok(None) => {
                                     if !batch.is_empty() {
                                         emit_or_buffer(batch);

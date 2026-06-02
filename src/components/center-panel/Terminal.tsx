@@ -4,8 +4,9 @@ import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
+import { CanvasAddon } from "@xterm/addon-canvas";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
-import { X, ChevronDown, ChevronUp } from "lucide-react";
+import { X, ChevronDown, ChevronUp, ArrowDownToLine } from "lucide-react";
 import "@xterm/xterm/css/xterm.css";
 import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/700.css";
@@ -20,6 +21,37 @@ const GLYPH_REPLACE = "\u25CF";
 function fixGlyphs(text: string): string {
   GLYPH_REGEX.lastIndex = 0;
   return GLYPH_REGEX.test(text) ? (GLYPH_REGEX.lastIndex = 0, text.replace(GLYPH_REGEX, GLYPH_REPLACE)) : text;
+}
+
+type RendererAddon = WebglAddon | CanvasAddon;
+
+/** 加载/切换 xterm 渲染器。先释放旧的，再按 type 装新的。
+ *  WebGL 不可用时 catch 后回退到 xterm 内置 DOM 渲染器。 */
+function applyRenderer(
+  term: XTerm,
+  type: "canvas" | "webgl",
+  ref: { current: RendererAddon | null },
+) {
+  try { ref.current?.dispose(); } catch { /* ignore */ }
+  ref.current = null;
+  try {
+    if (type === "webgl") {
+      const webgl = new WebglAddon();
+      webgl.onContextLoss(() => {
+        try { webgl.dispose(); } catch { /* ignore */ }
+        if (ref.current === webgl) ref.current = null;
+      });
+      term.loadAddon(webgl);
+      ref.current = webgl;
+    } else {
+      const canvas = new CanvasAddon();
+      term.loadAddon(canvas);
+      ref.current = canvas;
+    }
+  } catch {
+    // 渲染器不可用 → xterm 自动用 DOM 渲染兜底
+    ref.current = null;
+  }
 }
 
 const TERMINAL_THEMES: Record<Theme, ITheme> = {
@@ -403,6 +435,7 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const shellNameRef = useRef<string | null>(null);
+  const rendererAddonRef = useRef<RendererAddon | null>(null);
   const lastPtySizeRef = useRef({ cols: 80, rows: 24 });
   const syncPtySizeRef = useRef<() => void>(() => {});
   // Track latest projectPath via ref so the spawn timer can read it
@@ -419,10 +452,13 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
   const terminalFontSize = useSettingsStore((s) => s.terminalFontSize);
   const terminalScrollback = useSettingsStore((s) => s.terminalScrollback);
   const terminalLineHeight = useSettingsStore((s) => s.terminalLineHeight);
+  const terminalRenderer = useSettingsStore((s) => s.terminalRenderer);
 
   // Inline search bar state
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  // 滚动到底部浮动按钮：向上滚动查看历史时显示
+  const [showScrollBottom, setShowScrollBottom] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const toggleSearchRef = useRef<() => void>(() => {});
 
@@ -464,6 +500,8 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
   useEffect(() => {
     if (xtermRef.current) {
       xtermRef.current.options.theme = TERMINAL_THEMES[theme];
+      // 主题切换后旧颜色字形仍缓存在 WebGL 纹理图集里，清掉避免残留旧色
+      try { rendererAddonRef.current?.clearTextureAtlas(); } catch { /* ignore */ }
     }
   }, [theme]);
 
@@ -471,6 +509,7 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
   useEffect(() => {
     if (xtermRef.current && fitAddonRef.current) {
       xtermRef.current.options.fontSize = terminalFontSize;
+      try { rendererAddonRef.current?.clearTextureAtlas(); } catch { /* ignore */ }
       try { fitAddonRef.current.fit(); } catch { /* 容器不可见 */ }
       syncPtySizeRef.current();
     }
@@ -479,6 +518,7 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
   useEffect(() => {
     if (xtermRef.current && fitAddonRef.current) {
       xtermRef.current.options.lineHeight = terminalLineHeight;
+      try { rendererAddonRef.current?.clearTextureAtlas(); } catch { /* ignore */ }
       try { fitAddonRef.current.fit(); } catch { /* 容器不可见 */ }
       syncPtySizeRef.current();
     }
@@ -489,6 +529,19 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
       xtermRef.current.options.scrollback = terminalScrollback;
     }
   }, [terminalScrollback]);
+
+  // 切换渲染器：热替换 addon（首次 mount 已在初始化时加载，故跳过）
+  const rendererMountedRef = useRef(false);
+  useEffect(() => {
+    if (!rendererMountedRef.current) {
+      rendererMountedRef.current = true;
+      return;
+    }
+    const term = xtermRef.current;
+    if (!term) return;
+    applyRenderer(term, terminalRenderer, rendererAddonRef);
+    try { term.refresh(0, term.rows - 1); } catch { /* ignore */ }
+  }, [terminalRenderer]);
 
   // Re-fit when visibility changes (tab switch) and flush buffered output
   useEffect(() => {
@@ -574,15 +627,9 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
 
     term.open(containerRef.current);
 
-    // WebGL renderer for better performance (GPU-accelerated)
-    // Falls back to DOM renderer if WebGL is not available
-    try {
-      const webgl = new WebglAddon();
-      webgl.onContextLoss(() => { webgl.dispose(); });
-      term.loadAddon(webgl);
-    } catch {
-      // WebGL not available — DOM renderer used as fallback
-    }
+    // 渲染器（canvas / webgl）由下方独立的 terminalRenderer effect 在 mount 后加载，
+    // 这样切换设置时可热替换，无需重建终端。
+    applyRenderer(term, useSettingsStore.getState().terminalRenderer, rendererAddonRef);
 
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
@@ -590,6 +637,27 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
 
     // 向父组件提供聚焦函数
     onFocusReady?.(() => term.focus());
+
+    // 监听滚动：
+    //  1. 用户离开底部时显示「回到底部」按钮（只在状态翻转时 setState，避免重渲染风暴）
+    //  2. 滚动停止后做一次全量 refresh，清除 WebGL 渲染器在大 scrollback 下
+    //     滚动时偶发的残影/错位（已知问题）
+    let lastAwayFromBottom = false;
+    let scrollRepaintTimer: ReturnType<typeof setTimeout> | null = null;
+    term.onScroll(() => {
+      const buf = term.buffer.active;
+      const away = buf.viewportY < buf.baseY;
+      if (away !== lastAwayFromBottom) {
+        lastAwayFromBottom = away;
+        setShowScrollBottom(away);
+      }
+      if (scrollRepaintTimer) clearTimeout(scrollRepaintTimer);
+      scrollRepaintTimer = setTimeout(() => {
+        scrollRepaintTimer = null;
+        if (disposed) return;
+        try { term.refresh(0, term.rows - 1); } catch { /* ignore */ }
+      }, 80);
+    });
 
     const container = containerRef.current;
     const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent);
@@ -718,6 +786,31 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
     let unlistenOutputFn: (() => void) | null = null;
     let unlistenExitFn: (() => void) | null = null;
 
+    // 输出按帧合批：一帧内到达的多个 chunk 拼成一次 term.write，
+    // 减少刷屏（cat 大文件 / claude 流式 / build 日志）时的写入次数与重排。
+    // 同时设软上限做前端背压，失控输出时丢弃最旧 chunk 保护渲染线程。
+    let writeQueue: string[] = [];
+    let writeQueueBytes = 0;
+    let writeRaf: number | null = null;
+    const MAX_QUEUE_BYTES = 8 * 1024 * 1024; // 8MB
+    const flushWrites = () => {
+      writeRaf = null;
+      if (disposed || writeQueue.length === 0) return;
+      const joined = writeQueue.join("");
+      writeQueue = [];
+      writeQueueBytes = 0;
+      try { term.write(joined); } catch { /* term disposed */ }
+    };
+    const enqueueWrite = (data: string) => {
+      writeQueue.push(data);
+      writeQueueBytes += data.length;
+      // 背压：队列超限丢弃最旧的，保留最新输出
+      while (writeQueueBytes > MAX_QUEUE_BYTES && writeQueue.length > 1) {
+        writeQueueBytes -= writeQueue.shift()!.length;
+      }
+      if (writeRaf == null) writeRaf = requestAnimationFrame(flushWrites);
+    };
+
     // Safe fit helper — 只在维度真正变化时才 fit，避免滚动时滚动条变化触发的
     // ResizeObserver 导致 fit() 重置滚动位置
     const safeFit = () => {
@@ -744,7 +837,7 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
         if (disposed) return;
         const data = fixGlyphs(event.payload);
         if (visibleRef.current) {
-          term.write(data);
+          enqueueWrite(data);
         } else {
           const buf = outputBufferRef.current;
           if (buf.length < 5000) {
@@ -904,6 +997,7 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
       window.removeEventListener("terminal-drag-end", onDragEnd);
       if (resizeTimer) clearTimeout(resizeTimer);
       if (dragEndTimer) clearTimeout(dragEndTimer);
+      if (writeRaf != null) cancelAnimationFrame(writeRaf);
       if (unlistenOutputFn) unlistenOutputFn();
       if (unlistenExitFn) unlistenExitFn();
       // Notify parent that session is gone
@@ -916,6 +1010,7 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
       xtermRef.current = null;
       fitAddonRef.current = null;
       searchAddonRef.current = null;
+      rendererAddonRef.current = null;
       sessionIdRef.current = null;
       shellNameRef.current = null;
     };
@@ -984,6 +1079,18 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
           overflow: "hidden",
         }}
       />
+      {showScrollBottom && (
+        <button
+          className="terminal-scroll-bottom"
+          title="Scroll to bottom"
+          onClick={() => {
+            xtermRef.current?.scrollToBottom();
+            xtermRef.current?.focus();
+          }}
+        >
+          <ArrowDownToLine size={16} />
+        </button>
+      )}
     </div>
   );
 });
