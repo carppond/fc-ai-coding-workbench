@@ -4,7 +4,6 @@ import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
-import { CanvasAddon } from "@xterm/addon-canvas";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { X, ChevronDown, ChevronUp, ArrowDownToLine } from "lucide-react";
 import "@xterm/xterm/css/xterm.css";
@@ -23,33 +22,30 @@ function fixGlyphs(text: string): string {
   return GLYPH_REGEX.test(text) ? (GLYPH_REGEX.lastIndex = 0, text.replace(GLYPH_REGEX, GLYPH_REPLACE)) : text;
 }
 
-type RendererAddon = WebglAddon | CanvasAddon;
+type RendererAddon = WebglAddon;
 
 /** 加载/切换 xterm 渲染器。先释放旧的，再按 type 装新的。
- *  WebGL 不可用时 catch 后回退到 xterm 内置 DOM 渲染器。 */
+ *  - "webgl"：GPU 加速，最快，但大 scrollback 下偶发花屏
+ *  - "dom"：不加任何 addon，用 xterm 内置 DOM 渲染器，最稳定、零依赖、必兼容
+ *  WebGL 不可用时 catch 后同样回退到 DOM。 */
 function applyRenderer(
   term: XTerm,
-  type: "canvas" | "webgl",
+  type: "dom" | "webgl",
   ref: { current: RendererAddon | null },
 ) {
   try { ref.current?.dispose(); } catch { /* ignore */ }
   ref.current = null;
+  if (type !== "webgl") return; // DOM：不加 addon
   try {
-    if (type === "webgl") {
-      const webgl = new WebglAddon();
-      webgl.onContextLoss(() => {
-        try { webgl.dispose(); } catch { /* ignore */ }
-        if (ref.current === webgl) ref.current = null;
-      });
-      term.loadAddon(webgl);
-      ref.current = webgl;
-    } else {
-      const canvas = new CanvasAddon();
-      term.loadAddon(canvas);
-      ref.current = canvas;
-    }
+    const webgl = new WebglAddon();
+    webgl.onContextLoss(() => {
+      try { webgl.dispose(); } catch { /* ignore */ }
+      if (ref.current === webgl) ref.current = null;
+    });
+    term.loadAddon(webgl);
+    ref.current = webgl;
   } catch {
-    // 渲染器不可用 → xterm 自动用 DOM 渲染兜底
+    // WebGL 不可用 → xterm 自动用 DOM 渲染兜底
     ref.current = null;
   }
 }

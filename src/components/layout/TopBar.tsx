@@ -247,9 +247,9 @@ function TerminalSettings() {
           <select
             className="font-settings__select"
             value={terminalRenderer}
-            onChange={(e) => setTerminalRenderer(e.target.value as "canvas" | "webgl")}
+            onChange={(e) => setTerminalRenderer(e.target.value as "dom" | "webgl")}
           >
-            <option value="canvas">{t("terminal.rendererCanvas")}</option>
+            <option value="dom">{t("terminal.rendererDom")}</option>
             <option value="webgl">{t("terminal.rendererWebgl")}</option>
           </select>
         </div>

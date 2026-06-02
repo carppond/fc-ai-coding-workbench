@@ -19,6 +19,13 @@ export function AppShell() {
 
   const handleCloseQuickOpen = useCallback(() => setQuickOpenVisible(false), []);
 
+  // 标记平台：macOS 用 titleBarStyle:Transparent，交通灯浮在左上角，
+  // 需给 top-bar 左侧留出空间避免遮挡标题。
+  useEffect(() => {
+    const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent);
+    document.documentElement.dataset.os = isMac ? "mac" : "other";
+  }, []);
+
   useEffect(() => {
     loadSettings();
     loadProjects();

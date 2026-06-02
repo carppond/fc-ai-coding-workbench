@@ -10,7 +10,7 @@ export type Theme =
   | "monokai" | "rosePine" | "ayuDark" | "everforest"
   | "githubLight" | "solarizedLight";
 
-export type TerminalRenderer = "canvas" | "webgl";
+export type TerminalRenderer = "dom" | "webgl";
 
 const THEME_ORDER: Theme[] = [
   "mocha", "macchiato", "frappe",
@@ -68,7 +68,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   chatFontSize: 14,
   terminalScrollback: 5000,
   terminalLineHeight: 1.35,
-  terminalRenderer: "canvas",
+  terminalRenderer: "dom",
   onboardingComplete: false,
   loading: true,
   envCache: null,
@@ -120,7 +120,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         ? Math.max(1000, Math.min(999999, scrollbackVal)) : 5000;
       const terminalLineHeight = typeof lineHeightVal === "number"
         ? Math.max(1.0, Math.min(2.0, lineHeightVal)) : 1.35;
-      const terminalRenderer: TerminalRenderer = rendererVal === "webgl" ? "webgl" : "canvas";
+      const terminalRenderer: TerminalRenderer = rendererVal === "webgl" ? "webgl" : "dom";
       document.documentElement.style.setProperty("--chat-font-size", chatFontSize + "px");
 
       set({

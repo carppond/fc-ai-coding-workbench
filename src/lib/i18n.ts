@@ -310,7 +310,7 @@ const translations: Record<Locale, Record<string, string>> = {
     "terminal.lines": "行",
     "terminal.lineHeight": "行高",
     "terminal.renderer": "渲染器",
-    "terminal.rendererCanvas": "Canvas（稳定）",
+    "terminal.rendererDom": "DOM（最稳定）",
     "terminal.rendererWebgl": "WebGL（高性能）",
 
     // Shortcuts Reference
@@ -670,7 +670,7 @@ const translations: Record<Locale, Record<string, string>> = {
     "terminal.lines": "lines",
     "terminal.lineHeight": "Line Height",
     "terminal.renderer": "Renderer",
-    "terminal.rendererCanvas": "Canvas (stable)",
+    "terminal.rendererDom": "DOM (most stable)",
     "terminal.rendererWebgl": "WebGL (fast)",
 
     // Shortcuts Reference

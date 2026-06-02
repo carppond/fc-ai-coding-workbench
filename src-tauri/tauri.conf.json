@@ -34,7 +34,9 @@
         "minHeight": 768,
         "resizable": true,
         "fullscreen": false,
-        "visible": true
+        "visible": true,
+        "titleBarStyle": "Transparent",
+        "hiddenTitle": true
       }
     ],
     "security": {
