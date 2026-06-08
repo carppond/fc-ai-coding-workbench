@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, memo } from "react";
 import { createPortal } from "react-dom";
-import { Plus, X, RotateCw, Sparkles, Zap, Play, History } from "lucide-react";
+import { Plus, X, RotateCw, Sparkles, Zap, Play, History, FastForward } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useProjectStore } from "../../stores/projectStore";
 import { useFileStore } from "../../stores/fileStore";
@@ -734,6 +734,14 @@ export function CenterPanel() {
         >
           <Play size={13} />
           <span>{t("terminal.launchCCContinue")}</span>
+        </button>
+        <button
+          className="cc-launch-btn cc-launch-btn--accept"
+          onClick={() => handleLaunchClaude("claude --continue --permission-mode acceptEdits")}
+          title={t("terminal.launchCCContinueAcceptEdits")}
+        >
+          <FastForward size={13} />
+          <span>{t("terminal.launchCCContinueAcceptEdits")}</span>
         </button>
         <button
           className="cc-launch-btn cc-launch-btn--ghost"
