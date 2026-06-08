@@ -915,18 +915,17 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
     // every frame but DEBOUNCE the PTY SIGWINCH 150ms so the shell only sees
     // the final size.
     //
-    // PTY has a floor of VT100 (24x80) — even if the pane is squeezed tiny,
-    // the shell still renders into 24x80; xterm shows a partial view with
-    // scrollback. This keeps TUI apps usable at any pane size.
+    // PTY 行列必须与 xterm 完全一致：TUI 应用（claude/ink、vim）按 PTY 报告的
+    // 行列做绝对光标定位和"清除上面 N 行再重绘"。若 PTY 尺寸 ≠ xterm（例如旧版
+    // 把 PTY 钳到 24x80 而面板更矮/更窄），claude 的重绘行数算错，旧内容清不掉、
+    // 与输入框重叠 → 错乱。这里始终下发 xterm 的真实行列（floor 1 防 0）。
     let isDragging = false;
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
-    const MIN_PTY_ROWS = 24;
-    const MIN_PTY_COLS = 80;
-    lastPtySizeRef.current = { cols: Math.max(MIN_PTY_COLS, term.cols), rows: Math.max(MIN_PTY_ROWS, term.rows) };
+    lastPtySizeRef.current = { cols: Math.max(1, term.cols), rows: Math.max(1, term.rows) };
     const notifyPtyResize = () => {
       if (disposed) return;
-      const newCols = Math.max(MIN_PTY_COLS, term.cols);
-      const newRows = Math.max(MIN_PTY_ROWS, term.rows);
+      const newCols = Math.max(1, term.cols);
+      const newRows = Math.max(1, term.rows);
       const last = lastPtySizeRef.current;
       if (newCols !== last.cols || newRows !== last.rows) {
         last.cols = newCols;
@@ -941,11 +940,16 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
       if (isDragging) return;
       if (!visibleRef.current) return;
       if (container.clientWidth === 0 || container.clientHeight === 0) return;
-      safeFit();
+      // 防抖后 fit + PTY 同步一起做，保持 xterm 与 PTY/claude 尺寸锁步。
+      // 否则"xterm 立即变新尺寸、PTY 80ms 后才同步"的窗口期内，TUI（claude/ink）
+      // 会按旧尺寸重绘进新尺寸的 xterm，造成内容错位/重叠（分屏后尤其明显）。
       if (resizeTimer) clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
+        if (disposed || !visibleRef.current) return;
+        if (container.clientWidth === 0 || container.clientHeight === 0) return;
+        safeFit();
         notifyPtyResize();
-      }, 80);
+      }, 60);
     };
 
     // Drag lifecycle: freeze during drag, then fit + sync PTY on drag-end.
