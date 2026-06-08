@@ -543,10 +543,10 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
     try { term.refresh(0, term.rows - 1); } catch { /* ignore */ }
   }, [terminalRenderer]);
 
-  // Re-fit when visibility changes (tab switch) and flush buffered output
+  // 可见性变化（tab 切换）：内容隐藏期已实时写入 xterm，无需回放，
+  // 这里只需排空残余队列、fit（尺寸可能在隐藏期变过）并重绘一次。
   useEffect(() => {
     if (visible) {
-      // 切回 tab：排空隐藏期积压的输出（单一有序队列，分帧排空）
       flushWritesRef.current();
       if (fitAddonRef.current) {
         try {
@@ -556,6 +556,11 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
         }
       }
       syncPtySizeRef.current();
+      // 隐藏期未渲染，切回需强制重绘一次把缓冲内容画出来（尤其 WebGL）
+      const term = xtermRef.current;
+      if (term) {
+        try { term.refresh(0, term.rows - 1); } catch { /* ignore */ }
+      }
       // visible 变 true 时聚焦（tab 切换 / 首次 mount）
       // 多 pane 时 CenterPanel 会在之后覆盖为正确的 pane
       requestAnimationFrame(() => {
@@ -796,11 +801,14 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
         writeQueueBytes -= item.length;
       }
       try { term.write(batch.join("")); } catch { /* term disposed */ }
-      // 还有积压 → 下一帧继续排空（经 scheduleFlush 以便隐藏时暂停排空）
+      // 还有积压 → 下一帧继续排空
       if (writeQueue.length > 0) scheduleFlush();
     };
+    // 始终排空（含隐藏时）：隐藏 tab 也实时写入 xterm，保持与 claude 同步。
+    // 否则隐藏期攒着、切回再一次性回放 claude 的"增量重绘"，起始状态稍有错位即错乱。
+    // 隐藏时 DOM 渲染器不绘制，仅解析 ANSI，CPU 开销极小。
     const scheduleFlush = () => {
-      if (visibleRef.current && writeRaf == null) {
+      if (writeRaf == null) {
         writeRaf = requestAnimationFrame(flushWrites);
       }
     };
