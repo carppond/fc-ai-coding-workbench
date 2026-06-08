@@ -15,7 +15,6 @@ const SKIP_DIRS: &[&str] = &[
     "node_modules",
     ".git",
     "target",
-    "dist",
     "build",
     ".next",
     "__pycache__",

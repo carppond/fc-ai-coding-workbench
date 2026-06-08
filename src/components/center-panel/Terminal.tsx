@@ -14,6 +14,9 @@ import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import * as ipc from "../../ipc/commands";
 import { useSettingsStore, type Theme } from "../../stores/settingsStore";
 
+/** 当前是否运行在 Windows（用于启用 ConPTY 兼容处理）。 */
+const IS_WINDOWS = typeof navigator !== "undefined" && /Windows/.test(navigator.userAgent);
+
 /** Replace glyphs that render poorly in xterm.js with visually equivalent alternatives. */
 const GLYPH_REGEX = /\u23FA/g; // ⏺ → ● (compiled once, reused per call)
 const GLYPH_REPLACE = "\u25CF";
@@ -443,7 +446,8 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
   // Track visibility via ref for output buffering (avoids xterm processing when hidden)
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
-  const outputBufferRef = useRef<string[]>([]);
+  // 触发输出队列 flush（由可见性 effect 在 tab 切回时调用，桥接到 mount effect 内部）
+  const flushWritesRef = useRef<() => void>(() => {});
   const theme = useSettingsStore((s) => s.theme);
   const terminalFontSize = useSettingsStore((s) => s.terminalFontSize);
   const terminalScrollback = useSettingsStore((s) => s.terminalScrollback);
@@ -542,25 +546,8 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
   // Re-fit when visibility changes (tab switch) and flush buffered output
   useEffect(() => {
     if (visible) {
-      // Flush buffered output in chunks to avoid UI freeze on large buffers
-      if (xtermRef.current && outputBufferRef.current.length > 0) {
-        const buffer = outputBufferRef.current;
-        outputBufferRef.current = [];
-        const CHUNK_SIZE = 100;
-        const term = xtermRef.current;
-        let offset = 0;
-        const flushChunk = () => {
-          const chunk = buffer.slice(offset, offset + CHUNK_SIZE);
-          if (chunk.length > 0) {
-            term.write(chunk.join(""));
-            offset += CHUNK_SIZE;
-            if (offset < buffer.length) {
-              requestAnimationFrame(flushChunk);
-            }
-          }
-        };
-        flushChunk();
-      }
+      // 切回 tab：排空隐藏期积压的输出（单一有序队列，分帧排空）
+      flushWritesRef.current();
       if (fitAddonRef.current) {
         try {
           fitAddonRef.current.fit();
@@ -601,6 +588,9 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
       macOptionClickForcesSelection: true,
       minimumContrastRatio: 1,
       drawBoldTextInBrightColors: true,
+      // Windows: 启用 ConPTY 兼容处理。不设置时 xterm 把 ConPTY 当 Unix PTY，
+      // 换行/光标与 ConPTY 错位，会在行首残留字符（去不掉的首字母）。
+      ...(IS_WINDOWS ? { windowsPty: { backend: "conpty" as const } } : {}),
     });
 
     // --- Addons ---
@@ -782,20 +772,37 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
     let unlistenOutputFn: (() => void) | null = null;
     let unlistenExitFn: (() => void) | null = null;
 
-    // 输出按帧合批：一帧内到达的多个 chunk 拼成一次 term.write，
-    // 减少刷屏（cat 大文件 / claude 流式 / build 日志）时的写入次数与重排。
-    // 同时设软上限做前端背压，失控输出时丢弃最旧 chunk 保护渲染线程。
+    // 单一有序输出队列：可见与隐藏共用同一队列，避免两条独立 rAF 链并发
+    // 写入导致 CLI 输出错位/花屏。
+    //  - 按帧合批：一帧内到达的多个 chunk 拼成一次 term.write，减少刷屏时的写入次数
+    //  - 隐藏时只入队不 flush（scheduleFlush 在不可见时 no-op），切回 tab 时由
+    //    可见性 effect 调 flushWritesRef 触发，按入队顺序排空
+    //  - 单帧写入预算 256KB：隐藏期积压大量输出后切回，分帧排空避免一次性卡 UI
+    //  - 软上限 8MB 背压：失控输出丢弃最旧 chunk 保护渲染线程
     let writeQueue: string[] = [];
     let writeQueueBytes = 0;
     let writeRaf: number | null = null;
-    const MAX_QUEUE_BYTES = 8 * 1024 * 1024; // 8MB
+    const MAX_QUEUE_BYTES = 8 * 1024 * 1024;
+    const MAX_FLUSH_BYTES_PER_FRAME = 256 * 1024;
     const flushWrites = () => {
       writeRaf = null;
       if (disposed || writeQueue.length === 0) return;
-      const joined = writeQueue.join("");
-      writeQueue = [];
-      writeQueueBytes = 0;
-      try { term.write(joined); } catch { /* term disposed */ }
+      let bytes = 0;
+      const batch: string[] = [];
+      while (writeQueue.length > 0 && bytes < MAX_FLUSH_BYTES_PER_FRAME) {
+        const item = writeQueue.shift()!;
+        batch.push(item);
+        bytes += item.length;
+        writeQueueBytes -= item.length;
+      }
+      try { term.write(batch.join("")); } catch { /* term disposed */ }
+      // 还有积压 → 下一帧继续排空（经 scheduleFlush 以便隐藏时暂停排空）
+      if (writeQueue.length > 0) scheduleFlush();
+    };
+    const scheduleFlush = () => {
+      if (visibleRef.current && writeRaf == null) {
+        writeRaf = requestAnimationFrame(flushWrites);
+      }
     };
     const enqueueWrite = (data: string) => {
       writeQueue.push(data);
@@ -804,8 +811,10 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
       while (writeQueueBytes > MAX_QUEUE_BYTES && writeQueue.length > 1) {
         writeQueueBytes -= writeQueue.shift()!.length;
       }
-      if (writeRaf == null) writeRaf = requestAnimationFrame(flushWrites);
+      scheduleFlush();
     };
+    // 暴露给可见性 effect：tab 切回时触发排空
+    flushWritesRef.current = scheduleFlush;
 
     // Safe fit helper — 只在维度真正变化时才 fit，避免滚动时滚动条变化触发的
     // ResizeObserver 导致 fit() 重置滚动位置
@@ -831,21 +840,15 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
       // Register listeners BEFORE subscribing so no output is lost
       unlistenOutputFn = await listen<string>(`terminal-output-${sessionId}`, (event) => {
         if (disposed) return;
-        const data = fixGlyphs(event.payload);
-        if (visibleRef.current) {
-          enqueueWrite(data);
-        } else {
-          const buf = outputBufferRef.current;
-          if (buf.length < 5000) {
-            buf.push(data);
-          }
-        }
+        // 始终入同一队列；隐藏时只积压不 flush，切回 tab 时按序排空
+        enqueueWrite(fixGlyphs(event.payload));
       });
       if (disposed) { unlistenOutputFn(); return; }
 
       unlistenExitFn = await listen<string>(`terminal-exit-${sessionId}`, () => {
         if (disposed) return;
-        term.write("\r\n[Process exited]\r\n");
+        // 走同一队列，确保排在进程最后输出之后（避免退出提示插队到前面）
+        enqueueWrite("\r\n[Process exited]\r\n");
         onAliveChange?.(false);
       });
       if (disposed) { unlistenExitFn(); return; }
