@@ -1,5 +1,7 @@
+use super::run_blocking;
 use crate::errors::AppResult;
 use serde::Serialize;
+use std::io::Read;
 use std::path::Path;
 
 /// 排序：目录在前，文件在后，各自按字母序
@@ -7,7 +9,9 @@ fn sort_entries_dirs_first(entries: &mut Vec<std::fs::DirEntry>) {
     entries.sort_by(|a, b| {
         let a_dir = a.file_type().map(|t| t.is_dir()).unwrap_or(false);
         let b_dir = b.file_type().map(|t| t.is_dir()).unwrap_or(false);
-        b_dir.cmp(&a_dir).then_with(|| a.file_name().cmp(&b.file_name()))
+        b_dir
+            .cmp(&a_dir)
+            .then_with(|| a.file_name().cmp(&b.file_name()))
     });
 }
 
@@ -33,72 +37,81 @@ pub struct DirEntry {
 /// Used for lazy-loading: the frontend calls this when a directory is expanded.
 #[tauri::command]
 pub async fn read_directory_children(path: String) -> AppResult<Vec<DirEntry>> {
-    let dir = Path::new(&path);
-    let mut entries = Vec::new();
+    run_blocking(move || {
+        let dir = Path::new(&path);
+        let mut entries = Vec::new();
 
-    let read_dir = std::fs::read_dir(dir)?;
-    let mut sorted: Vec<_> = read_dir.filter_map(|e| e.ok()).collect();
-    sort_entries_dirs_first(&mut sorted);
+        let read_dir = std::fs::read_dir(dir)?;
+        let mut sorted: Vec<_> = read_dir.filter_map(|e| e.ok()).collect();
+        sort_entries_dirs_first(&mut sorted);
 
-    for child in sorted {
-        let name = child.file_name().to_string_lossy().to_string();
-        if SKIP_DIRS.contains(&name.as_str()) {
-            continue;
+        for child in sorted {
+            let name = child.file_name().to_string_lossy().to_string();
+            if SKIP_DIRS.contains(&name.as_str()) {
+                continue;
+            }
+            let is_dir = child.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            entries.push(DirEntry {
+                name,
+                path: child.path().to_string_lossy().to_string(),
+                is_dir,
+                // Directories get an empty children array (signals "expandable, not yet loaded")
+                // Files get null (not expandable)
+                children: if is_dir { Some(Vec::new()) } else { None },
+            });
         }
-        let is_dir = child.file_type().map(|t| t.is_dir()).unwrap_or(false);
-        entries.push(DirEntry {
-            name,
-            path: child.path().to_string_lossy().to_string(),
-            is_dir,
-            // Directories get an empty children array (signals "expandable, not yet loaded")
-            // Files get null (not expandable)
-            children: if is_dir { Some(Vec::new()) } else { None },
-        });
-    }
 
-    Ok(entries)
+        Ok(entries)
+    })
+    .await
 }
 
 /// Legacy: read full tree up to max_depth. Kept for backward compatibility but
 /// now only used for the initial shallow load (depth=1).
 #[tauri::command]
-pub fn read_directory_tree(path: String, max_depth: Option<usize>) -> AppResult<Vec<DirEntry>> {
-    let dir = Path::new(&path);
-    let depth = max_depth.unwrap_or(1);
-    let mut entries = Vec::new();
+pub async fn read_directory_tree(
+    path: String,
+    max_depth: Option<usize>,
+) -> AppResult<Vec<DirEntry>> {
+    run_blocking(move || {
+        let dir = Path::new(&path);
+        let depth = max_depth.unwrap_or(1);
+        let mut entries = Vec::new();
 
-    let read_dir = std::fs::read_dir(dir)?;
-    let mut sorted: Vec<_> = read_dir.filter_map(|e| e.ok()).collect();
-    sort_entries_dirs_first(&mut sorted);
+        let read_dir = std::fs::read_dir(dir)?;
+        let mut sorted: Vec<_> = read_dir.filter_map(|e| e.ok()).collect();
+        sort_entries_dirs_first(&mut sorted);
 
-    for child in sorted {
-        let name = child.file_name().to_string_lossy().to_string();
-        if SKIP_DIRS.contains(&name.as_str()) {
-            continue;
-        }
-        let is_dir = child.file_type().map(|t| t.is_dir()).unwrap_or(false);
-
-        let children = if is_dir && depth > 1 {
-            // Load one more level
-            match read_children_recursive(child.path().as_path(), depth - 1) {
-                Ok(kids) => Some(kids),
-                Err(_) => Some(Vec::new()),
+        for child in sorted {
+            let name = child.file_name().to_string_lossy().to_string();
+            if SKIP_DIRS.contains(&name.as_str()) {
+                continue;
             }
-        } else if is_dir {
-            Some(Vec::new())
-        } else {
-            None
-        };
+            let is_dir = child.file_type().map(|t| t.is_dir()).unwrap_or(false);
 
-        entries.push(DirEntry {
-            name,
-            path: child.path().to_string_lossy().to_string(),
-            is_dir,
-            children,
-        });
-    }
+            let children = if is_dir && depth > 1 {
+                // Load one more level
+                match read_children_recursive(child.path().as_path(), depth - 1) {
+                    Ok(kids) => Some(kids),
+                    Err(_) => Some(Vec::new()),
+                }
+            } else if is_dir {
+                Some(Vec::new())
+            } else {
+                None
+            };
 
-    Ok(entries)
+            entries.push(DirEntry {
+                name,
+                path: child.path().to_string_lossy().to_string(),
+                is_dir,
+                children,
+            });
+        }
+
+        Ok(entries)
+    })
+    .await
 }
 
 fn read_children_recursive(dir: &Path, remaining_depth: usize) -> AppResult<Vec<DirEntry>> {
@@ -138,33 +151,42 @@ fn read_children_recursive(dir: &Path, remaining_depth: usize) -> AppResult<Vec<
 
 #[tauri::command]
 pub async fn create_file_or_dir(path: String, is_dir: bool) -> AppResult<()> {
-    if is_dir {
-        std::fs::create_dir_all(&path)?;
-    } else {
-        // Ensure parent directory exists
-        if let Some(parent) = std::path::Path::new(&path).parent() {
-            std::fs::create_dir_all(parent)?;
+    run_blocking(move || {
+        if is_dir {
+            std::fs::create_dir_all(&path)?;
+        } else {
+            // Ensure parent directory exists
+            if let Some(parent) = std::path::Path::new(&path).parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&path, "")?;
         }
-        std::fs::write(&path, "")?;
-    }
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn rename_entry(old_path: String, new_path: String) -> AppResult<()> {
-    std::fs::rename(&old_path, &new_path)?;
-    Ok(())
+    run_blocking(move || {
+        std::fs::rename(&old_path, &new_path)?;
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn delete_entry(path: String) -> AppResult<()> {
-    let p = std::path::Path::new(&path);
-    if p.is_dir() {
-        std::fs::remove_dir_all(&path)?;
-    } else {
-        std::fs::remove_file(&path)?;
-    }
-    Ok(())
+    run_blocking(move || {
+        let p = std::path::Path::new(&path);
+        if p.is_dir() {
+            std::fs::remove_dir_all(&path)?;
+        } else {
+            std::fs::remove_file(&path)?;
+        }
+        Ok(())
+    })
+    .await
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -180,199 +202,241 @@ pub async fn search_in_files(
     query: String,
     max_results: Option<usize>,
 ) -> AppResult<Vec<FileSearchResult>> {
-    let max = max_results.unwrap_or(200);
-    let query_lower = query.to_lowercase();
-    let mut results = Vec::new();
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
 
-    fn walk_dir(
-        dir: &std::path::Path,
-        query_lower: &str,
-        results: &mut Vec<FileSearchResult>,
-        max: usize,
-        project_path: &str,
-    ) {
-        let read_dir = match std::fs::read_dir(dir) {
-            Ok(rd) => rd,
-            Err(_) => return,
-        };
-        for entry in read_dir.filter_map(|e| e.ok()) {
-            if results.len() >= max {
-                return;
-            }
-            let name = entry.file_name().to_string_lossy().to_string();
-            if SKIP_DIRS.contains(&name.as_str()) {
-                continue;
-            }
-            let path = entry.path();
-            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-            if is_dir {
-                walk_dir(&path, query_lower, results, max, project_path);
-            } else {
-                // Skip binary/large files
-                let metadata = match std::fs::metadata(&path) {
-                    Ok(m) => m,
-                    Err(_) => continue,
-                };
-                if metadata.len() > 1_000_000 {
+    run_blocking(move || {
+        let max = max_results.unwrap_or(200);
+        let query_lower = query.to_lowercase();
+        let mut results = Vec::new();
+
+        fn walk_dir(
+            dir: &std::path::Path,
+            query_lower: &str,
+            results: &mut Vec<FileSearchResult>,
+            max: usize,
+            project_path: &str,
+        ) {
+            let read_dir = match std::fs::read_dir(dir) {
+                Ok(rd) => rd,
+                Err(_) => return,
+            };
+            for entry in read_dir.filter_map(|e| e.ok()) {
+                if results.len() >= max {
+                    return;
+                }
+                let name = entry.file_name().to_string_lossy().to_string();
+                if SKIP_DIRS.contains(&name.as_str()) {
                     continue;
                 }
-                let content = match std::fs::read_to_string(&path) {
-                    Ok(c) => c,
-                    Err(_) => continue, // skip binary files
-                };
-                let mut file_matches = 0;
-                for (i, line) in content.lines().enumerate() {
-                    if results.len() >= max {
-                        return;
+                let path = entry.path();
+                let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                if is_dir {
+                    walk_dir(&path, query_lower, results, max, project_path);
+                } else {
+                    // 跳过二进制/大文件
+                    let metadata = match std::fs::metadata(&path) {
+                        Ok(m) => m,
+                        Err(_) => continue,
+                    };
+                    if metadata.len() > 1_000_000 {
+                        continue;
                     }
-                    if file_matches >= 10 {
-                        break;
-                    }
-                    if line.to_lowercase().contains(query_lower) {
-                        let rel_path = path
-                            .to_string_lossy()
-                            .strip_prefix(project_path)
-                            .unwrap_or(&path.to_string_lossy())
-                            .trim_start_matches('/')
-                            .to_string();
-                        results.push(FileSearchResult {
-                            path: rel_path,
-                            line_number: i + 1,
-                            line_content: line.chars().take(200).collect(),
-                        });
-                        file_matches += 1;
+                    let content = match std::fs::read_to_string(&path) {
+                        Ok(c) => c,
+                        Err(_) => continue,
+                    };
+                    let mut file_matches = 0;
+                    for (i, line) in content.lines().enumerate() {
+                        if results.len() >= max {
+                            return;
+                        }
+                        if file_matches >= 10 {
+                            break;
+                        }
+                        if line.to_lowercase().contains(query_lower) {
+                            let rel_path = path
+                                .to_string_lossy()
+                                .strip_prefix(project_path)
+                                .unwrap_or(&path.to_string_lossy())
+                                .trim_start_matches('/')
+                                .to_string();
+                            results.push(FileSearchResult {
+                                path: rel_path,
+                                line_number: i + 1,
+                                line_content: line.chars().take(200).collect(),
+                            });
+                            file_matches += 1;
+                        }
                     }
                 }
             }
         }
-    }
 
-    if query.is_empty() {
-        return Ok(results);
-    }
-
-    walk_dir(
-        std::path::Path::new(&project_path),
-        &query_lower,
-        &mut results,
-        max,
-        &project_path,
-    );
-    Ok(results)
+        walk_dir(
+            std::path::Path::new(&project_path),
+            &query_lower,
+            &mut results,
+            max,
+            &project_path,
+        );
+        Ok(results)
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn show_in_folder(path: String) -> AppResult<()> {
-    let p = std::path::Path::new(&path);
-    // If path is a file, reveal it (select it) in the file manager.
-    // If it's a directory, open the directory.
-    #[cfg(target_os = "macos")]
-    {
-        if p.is_dir() {
-            std::process::Command::new("open")
-                .arg(&path)
-                .spawn()
-                .map_err(|e| crate::errors::AppError::General(e.to_string()))?;
-        } else {
-            std::process::Command::new("open")
-                .arg("-R")
-                .arg(&path)
+    run_blocking(move || {
+        let p = std::path::Path::new(&path);
+        // If path is a file, reveal it (select it) in the file manager.
+        // If it's a directory, open the directory.
+        #[cfg(target_os = "macos")]
+        {
+            if p.is_dir() {
+                std::process::Command::new("open")
+                    .arg(&path)
+                    .spawn()
+                    .map_err(|e| crate::errors::AppError::General(e.to_string()))?;
+            } else {
+                std::process::Command::new("open")
+                    .arg("-R")
+                    .arg(&path)
+                    .spawn()
+                    .map_err(|e| crate::errors::AppError::General(e.to_string()))?;
+            }
+        }
+        #[cfg(target_os = "windows")]
+        {
+            if p.is_dir() {
+                std::process::Command::new("explorer")
+                    .arg(&path)
+                    .spawn()
+                    .map_err(|e| crate::errors::AppError::General(e.to_string()))?;
+            } else {
+                std::process::Command::new("explorer")
+                    .arg("/select,")
+                    .arg(&path)
+                    .spawn()
+                    .map_err(|e| crate::errors::AppError::General(e.to_string()))?;
+            }
+        }
+        #[cfg(target_os = "linux")]
+        {
+            // Try xdg-open on the parent directory for files, or the dir itself
+            let target = if p.is_dir() {
+                path.clone()
+            } else {
+                p.parent()
+                    .map(|pp| pp.to_string_lossy().to_string())
+                    .unwrap_or(path.clone())
+            };
+            std::process::Command::new("xdg-open")
+                .arg(&target)
                 .spawn()
                 .map_err(|e| crate::errors::AppError::General(e.to_string()))?;
         }
-    }
-    #[cfg(target_os = "windows")]
-    {
-        if p.is_dir() {
-            std::process::Command::new("explorer")
-                .arg(&path)
-                .spawn()
-                .map_err(|e| crate::errors::AppError::General(e.to_string()))?;
-        } else {
-            std::process::Command::new("explorer")
-                .arg("/select,")
-                .arg(&path)
-                .spawn()
-                .map_err(|e| crate::errors::AppError::General(e.to_string()))?;
-        }
-    }
-    #[cfg(target_os = "linux")]
-    {
-        // Try xdg-open on the parent directory for files, or the dir itself
-        let target = if p.is_dir() {
-            path.clone()
-        } else {
-            p.parent()
-                .map(|pp| pp.to_string_lossy().to_string())
-                .unwrap_or(path.clone())
-        };
-        std::process::Command::new("xdg-open")
-            .arg(&target)
-            .spawn()
-            .map_err(|e| crate::errors::AppError::General(e.to_string()))?;
-    }
-    Ok(())
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn write_file_content(path: String, content: String) -> AppResult<()> {
-    // 确保父目录存在
-    if let Some(parent) = std::path::Path::new(&path).parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&path, &content)?;
-    Ok(())
+    run_blocking(move || {
+        // 确保父目录存在
+        if let Some(parent) = std::path::Path::new(&path).parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&path, &content)?;
+        Ok(())
+    })
+    .await
 }
 
 /// 列出项目下所有文件的相对路径（用于快速打开）
 #[tauri::command]
-pub async fn list_all_files(project_path: String, max_depth: Option<usize>) -> AppResult<Vec<String>> {
-    let root = std::path::Path::new(&project_path);
-    let depth_limit = max_depth.unwrap_or(20);
-    const MAX_FILES: usize = 10_000;
-    let mut files = Vec::new();
+pub async fn list_all_files(
+    project_path: String,
+    max_depth: Option<usize>,
+) -> AppResult<Vec<String>> {
+    run_blocking(move || {
+        let root = std::path::Path::new(&project_path);
+        let depth_limit = max_depth.unwrap_or(20);
+        const MAX_FILES: usize = 10_000;
+        let mut files = Vec::new();
 
-    fn walk(dir: &std::path::Path, root: &std::path::Path, files: &mut Vec<String>, depth: usize, max_depth: usize) {
-        if depth >= max_depth || files.len() >= MAX_FILES {
-            return;
-        }
-        let read_dir = match std::fs::read_dir(dir) {
-            Ok(rd) => rd,
-            Err(_) => return,
-        };
-        for entry in read_dir.filter_map(|e| e.ok()) {
-            if files.len() >= MAX_FILES {
+        fn walk(
+            dir: &std::path::Path,
+            root: &std::path::Path,
+            files: &mut Vec<String>,
+            depth: usize,
+            max_depth: usize,
+        ) {
+            if depth >= max_depth || files.len() >= MAX_FILES {
                 return;
             }
-            let name = entry.file_name().to_string_lossy().to_string();
-            if SKIP_DIRS.contains(&name.as_str()) || name.starts_with('.') {
-                continue;
-            }
-            let path = entry.path();
-            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-            if is_dir {
-                walk(&path, root, files, depth + 1, max_depth);
-            } else if let Ok(rel) = path.strip_prefix(root) {
-                files.push(rel.to_string_lossy().to_string());
+            let read_dir = match std::fs::read_dir(dir) {
+                Ok(rd) => rd,
+                Err(_) => return,
+            };
+            for entry in read_dir.filter_map(|e| e.ok()) {
+                if files.len() >= MAX_FILES {
+                    return;
+                }
+                let name = entry.file_name().to_string_lossy().to_string();
+                if SKIP_DIRS.contains(&name.as_str()) || name.starts_with('.') {
+                    continue;
+                }
+                let path = entry.path();
+                let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                if is_dir {
+                    walk(&path, root, files, depth + 1, max_depth);
+                } else if let Ok(rel) = path.strip_prefix(root) {
+                    files.push(rel.to_string_lossy().to_string());
+                }
             }
         }
-    }
 
-    walk(root, root, &mut files, 0, depth_limit);
-    files.sort();
-    Ok(files)
+        walk(root, root, &mut files, 0, depth_limit);
+        files.sort();
+        Ok(files)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn read_file_content(path: String, max_size: Option<u64>) -> AppResult<String> {
-    let max = max_size.unwrap_or(200_000_000); // 200MB default
-    let metadata = std::fs::metadata(&path)?;
-    if metadata.len() > max {
-        return Err(crate::errors::AppError::General(format!(
-            "File too large: {} bytes (max {})",
-            metadata.len(),
-            max
-        )));
-    }
-    Ok(std::fs::read_to_string(&path)?)
+pub async fn read_file_content(
+    path: String,
+    max_size: Option<u64>,
+) -> AppResult<tauri::ipc::Response> {
+    run_blocking(move || {
+        let max = max_size.unwrap_or(200_000_000); // 200MB default
+        let file = std::fs::File::open(&path)?;
+        let metadata = file.metadata()?;
+        let too_large = |size| {
+            crate::errors::AppError::General(format!(
+                "File too large: {} bytes (max {})",
+                size, max
+            ))
+        };
+        if metadata.len() > max {
+            return Err(too_large(metadata.len()));
+        }
+        // Bound the read as well: the file may grow after its metadata was checked.
+        let mut content = Vec::with_capacity(metadata.len() as usize);
+        file.take(max.saturating_add(1)).read_to_end(&mut content)?;
+        if content.len() as u64 > max {
+            return Err(too_large(content.len() as u64));
+        }
+        std::str::from_utf8(&content).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "stream did not contain valid UTF-8",
+            )
+        })?;
+        Ok(tauri::ipc::Response::new(content))
+    })
+    .await
 }

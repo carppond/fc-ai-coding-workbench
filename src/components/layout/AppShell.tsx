@@ -35,10 +35,13 @@ export function AppShell() {
     return () => clearTimeout(id);
   }, [loadSettings, loadProjects, loadLocale, preloadEnvCheck]);
 
-  // 全局 Cmd+P 快捷键
+  // Keep Ctrl+P available to coding CLIs for model cycling.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "p") {
+      const isMac = document.documentElement.dataset.os === "mac";
+      const inTerminal = e.target instanceof Element && Boolean(e.target.closest(".xterm"));
+      if (!e.defaultPrevented && !(inTerminal && e.ctrlKey)
+        && (isMac ? e.metaKey : e.ctrlKey) && e.key === "p") {
         e.preventDefault();
         setQuickOpenVisible((v) => !v);
       }

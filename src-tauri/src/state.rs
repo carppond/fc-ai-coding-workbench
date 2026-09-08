@@ -3,7 +3,8 @@ use crate::errors::AppError;
 use crate::proxy;
 use rusqlite::Connection;
 use std::collections::HashMap;
-use std::sync::{Mutex, Once, RwLock};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, RwLock};
 use tauri::{AppHandle, Manager};
 use tokio::sync::watch;
 
@@ -11,7 +12,7 @@ pub struct AppState {
     pub db: Mutex<Connection>,
     pub cancel_tokens: Mutex<HashMap<String, watch::Sender<bool>>>,
     pub http_client: RwLock<reqwest::Client>,
-    http_client_init: Once,
+    http_client_initialized: AtomicBool,
 }
 
 impl AppState {
@@ -48,18 +49,20 @@ impl AppState {
             db: Mutex::new(conn),
             cancel_tokens: Mutex::new(HashMap::new()),
             http_client: RwLock::new(placeholder_client),
-            http_client_init: Once::new(),
+            http_client_initialized: AtomicBool::new(false),
         })
     }
 
     /// 确保 HTTP client 已用正确的代理配置初始化（首次调用时执行，后续跳过）
     pub fn ensure_http_client(&self) {
-        self.http_client_init.call_once(|| {
+        if self.http_client_initialized.compare_exchange(
+            false, true, Ordering::AcqRel, Ordering::Acquire
+        ).is_ok() {
             if let Ok(client) = proxy::build_http_client(proxy::get_url().as_deref()) {
                 let mut guard = self.http_client.write().unwrap();
                 *guard = client;
             }
-        });
+        }
     }
 
     /// Rebuild the HTTP client with the current proxy setting.
@@ -69,6 +72,8 @@ impl AppState {
             .map_err(|e| AppError::General(e.to_string()))?;
         let mut guard = self.http_client.write().unwrap();
         *guard = new_client;
+        // rebuild 后标记为已初始化（防止 ensure 再次覆盖）
+        self.http_client_initialized.store(true, Ordering::Release);
         Ok(())
     }
 }

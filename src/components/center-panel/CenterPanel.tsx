@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, memo } from "react";
 import { createPortal } from "react-dom";
-import { Plus, X, RotateCw, Sparkles, Zap, Play, History, FastForward } from "lucide-react";
+import { Plus, X, RotateCw, Sparkles, Play, History, Loader2 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useProjectStore } from "../../stores/projectStore";
 import { useFileStore } from "../../stores/fileStore";
@@ -9,6 +9,10 @@ import { Terminal } from "./Terminal";
 import { FileViewer } from "./FileViewer";
 import { useConfirm } from "../common/ConfirmDialog";
 import * as ipc from "../../ipc/commands";
+import { useSettingsStore } from "../../stores/settingsStore";
+import { CODING_CLI_INFO, type CliLaunchAction } from "../../lib/codingCli";
+import { CodingCliSettings } from "../common/CodingCliSettings";
+import { useToast } from "../common/Toast";
 import {
   LayoutNode, LayoutLeaf,
   countLeaves, splitLeaf, removeLeaf,
@@ -109,6 +113,12 @@ export function CenterPanel() {
   const isDirty = useFileStore((s) => s.isDirty);
   const { t } = useI18n();
   const { confirm } = useConfirm();
+  const { toast } = useToast();
+  const codingCli = useSettingsStore((s) => s.codingCli);
+  const ompApprovalMode = useSettingsStore((s) => s.ompApprovalMode);
+  const envCache = useSettingsStore((s) => s.envCache);
+  const [launching, setLaunching] = useState(false);
+  const launchInFlightRef = useRef(false);
 
   // Tab 管理
   const [tabs, setTabs] = useState<TerminalTab[]>(() => [makeTab("Terminal 1")]);
@@ -159,10 +169,18 @@ export function CenterPanel() {
   /* ── pane 级别的 session/focus 映射（key = paneId）── */
   const sessionMapRef = useRef<Map<string, string>>(new Map());
   const focusMapRef = useRef<Map<string, () => void>>(new Map());
+  const [readyPaneIds, setReadyPaneIds] = useState<Set<string>>(() => new Set());
 
   const handlePaneSessionReady = useCallback((paneId: string, sessionId: string | null) => {
     if (sessionId) sessionMapRef.current.set(paneId, sessionId);
     else sessionMapRef.current.delete(paneId);
+    setReadyPaneIds((previous) => {
+      if (previous.has(paneId) === Boolean(sessionId)) return previous;
+      const next = new Set(previous);
+      if (sessionId) next.add(paneId);
+      else next.delete(paneId);
+      return next;
+    });
   }, []);
 
   const handlePaneFocusReady = useCallback((paneId: string, focusFn: () => void) => {
@@ -392,31 +410,52 @@ export function CenterPanel() {
     setTabs((prev) => prev.map((tab) => (tab.id === tabId ? { ...tab, title: val } : tab)));
   }, [editValue]);
 
-  /* ── 在当前活跃终端启动 Claude Code ──
-   * command 默认 "claude"，传 "claude --permission-mode acceptEdits" 则进入
-   * 自动接受文件编辑模式（仍会确认 Bash 等危险操作）。
-   */
-  const handleLaunchClaude = useCallback(async (command: string = "claude") => {
-    if (openFilePath) closeFile();
-    const curTab = tabs.find((t) => t.id === activeTabId);
+  /* ── Start the selected CLI in the current idle pane; preserve its real cwd. ── */
+  const handleLaunchCli = useCallback(async (action: CliLaunchAction) => {
+    if (launchInFlightRef.current) return;
+    const curTab = tabs.find((tab) => tab.id === activeTabId);
     if (!curTab) return;
     const paneId = getActivePaneId(curTab);
-    if (!isLeafAlive(curTab.layout, paneId)) return;
-
     const sessionId = sessionMapRef.current.get(paneId);
-    if (!sessionId) return;
+    if (!sessionId || !isLeafAlive(curTab.layout, paneId)) return;
 
+    launchInFlightRef.current = true;
+    setLaunching(true);
+    const file = useFileStore.getState();
     try {
-      const idle = await ipc.isTerminalIdle(sessionId);
-      if (!idle) {
-        focusMapRef.current.get(paneId)?.();
-        return;
+      if (file.openFilePath && file.isDirty) {
+        const discard = await confirm({
+          message: t("fileViewer.unsavedChanges"),
+          confirmLabel: t("fileViewer.dontSave"),
+          cancelLabel: t("confirm.cancel"),
+        });
+        if (discard !== true || useFileStore.getState().openFileVersion !== file.openFileVersion) return;
       }
-    } catch { /* 检查失败时仍允许执行 */ }
+      await ipc.launchCodingCli(
+        sessionId,
+        codingCli,
+        action,
+        codingCli === "omp" ? ompApprovalMode : "default",
+      );
+      if (file.openFilePath && useFileStore.getState().openFileVersion === file.openFileVersion) closeFile();
+      requestAnimationFrame(() => {
+        if (sessionMapRef.current.get(paneId) === sessionId) focusMapRef.current.get(paneId)?.();
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message
+        : error && typeof error === "object" && "message" in error ? String(error.message) : String(error);
+      toast(`${t("cli.launchFailed").replace("{cli}", CODING_CLI_INFO[codingCli].label)}: ${message}`, "error");
+    } finally {
+      launchInFlightRef.current = false;
+      setLaunching(false);
+    }
+  }, [activeTabId, tabs, codingCli, ompApprovalMode, closeFile, getActivePaneId, confirm, t, toast]);
 
-    ipc.writeTerminal(sessionId, `${command}\r`);
-    requestAnimationFrame(() => { focusMapRef.current.get(paneId)?.(); });
-  }, [activeTabId, tabs, openFilePath, closeFile, getActivePaneId]);
+  const selectedTab = tabs.find((tab) => tab.id === activeTabId);
+  const selectedPaneId = selectedTab ? getActivePaneId(selectedTab) : "";
+  const cliAvailable = envCache?.clis[codingCli].installed !== false;
+  const launchDisabled = launching || !cliAvailable || !selectedTab
+    || !readyPaneIds.has(selectedPaneId) || !isLeafAlive(selectedTab.layout, selectedPaneId);
 
   /* ── 重启 Pane（二叉树版）── */
   const handleRestartPane = useCallback((tabId: string, paneId: string) => {
@@ -463,8 +502,8 @@ export function CenterPanel() {
 
     const onMove = (ev: MouseEvent) => {
       const delta = (vertical ? ev.clientY : ev.clientX) - startPos;
-      // Floor of 120px — ~5 rows at default font. Smaller and TUI apps
-      // (claude CLI, vim) can't render their UI. xterm will still scrollback
+      // Floor of 120px — ~5 rows at the default font. TUI applications
+      // need enough rows to render their UI. xterm still keeps scrollback
       // for partial views, but the pane stays visible and usable.
       const MIN_PANE = 120;
       const newSize1 = Math.max(MIN_PANE, Math.min(total - MIN_PANE, size1 + delta));
@@ -725,49 +764,42 @@ export function CenterPanel() {
           </button>
         )}
 
-        {/* Spacer + Launch Claude Code buttons */}
-        <div style={{ flex: 1 }} />
-        <button
-          className="cc-launch-btn cc-launch-btn--ghost"
-          onClick={() => handleLaunchClaude("claude --continue")}
-          title={t("terminal.launchCCContinue")}
-        >
-          <Play size={13} />
-          <span>{t("terminal.launchCCContinue")}</span>
-        </button>
-        <button
-          className="cc-launch-btn cc-launch-btn--accept"
-          onClick={() => handleLaunchClaude("claude --continue --permission-mode acceptEdits")}
-          title={t("terminal.launchCCContinueAcceptEdits")}
-        >
-          <FastForward size={13} />
-          <span>{t("terminal.launchCCContinueAcceptEdits")}</span>
-        </button>
-        <button
-          className="cc-launch-btn cc-launch-btn--ghost"
-          onClick={() => handleLaunchClaude("claude --resume")}
-          title={t("terminal.launchCCResume")}
-        >
-          <History size={13} />
-          <span>{t("terminal.launchCCResume")}</span>
-        </button>
-        <button
-          className="cc-launch-btn cc-launch-btn--accept"
-          onClick={() => handleLaunchClaude("claude --permission-mode acceptEdits")}
-          title={t("terminal.launchCCAcceptEdits")}
-        >
-          <Zap size={13} />
-          <span>{t("terminal.launchCCAcceptEdits")}</span>
-        </button>
-        <button
-          className="cc-launch-btn"
-          onClick={() => handleLaunchClaude()}
-          title={t("terminal.launchCC")}
-        >
-          <Sparkles size={13} />
-          <span>{t("terminal.launchCC")}</span>
-        </button>
       </div>
+        <div className="cli-launcher" role="group" aria-label={t("cli.sessionActions")}>
+          <CodingCliSettings compact />
+          <div className="cli-launcher__actions">
+            <button
+              className="cli-launch-btn cli-launch-btn--ghost"
+              disabled={launchDisabled}
+              onClick={() => handleLaunchCli("continue")}
+              title={t("cli.continue")}
+            >
+              <Play size={13} />
+              <span>{t("cli.continue")}</span>
+            </button>
+            <button
+              className="cli-launch-btn cli-launch-btn--ghost"
+              disabled={launchDisabled}
+              onClick={() => handleLaunchCli("resume")}
+              title={t("cli.resume")}
+            >
+              <History size={13} />
+              <span>{t("cli.resume")}</span>
+            </button>
+            <button
+              className="cli-launch-btn"
+              disabled={launchDisabled}
+              onClick={() => handleLaunchCli("new")}
+              title={t("cli.newSession")}
+            >
+              {launching ? <Loader2 size={13} className="spin" /> : <Sparkles size={13} />}
+              <span>{t("cli.newSession")}</span>
+            </button>
+          </div>
+          {!cliAvailable && (
+            <span className="cli-launcher__hint">{t("cli.notInstalled").replace("{cli}", CODING_CLI_INFO[codingCli].label)}</span>
+          )}
+        </div>
 
       {/* Content area */}
       <div style={{ flex: 1, minHeight: 0, position: "relative" }}>

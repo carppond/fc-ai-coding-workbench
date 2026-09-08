@@ -1,7 +1,8 @@
 import { create } from "zustand";
 import type { ProviderConfig } from "../lib/types";
 import { DEFAULT_PROVIDERS } from "../lib/types";
-import type { EnvCheckResult } from "../ipc/commands";
+import type { EnvCheckResult, CliUpdateResult } from "../ipc/commands";
+import { CODING_CLI_IDS, type CodingCli, type OmpApprovalMode } from "../lib/codingCli";
 import * as ipc from "../ipc/commands";
 
 export type Theme =
@@ -24,6 +25,8 @@ interface SettingsState {
   activeProvider: string;
   activeModel: string;
   activeMode: string;
+  codingCli: CodingCli;
+  ompApprovalMode: OmpApprovalMode;
   theme: Theme;
   editorFontSize: number;
   terminalFontSize: number;
@@ -34,10 +37,18 @@ interface SettingsState {
   onboardingComplete: boolean;
   loading: boolean;
   envCache: EnvCheckResult | null;
+  envChecking: boolean;
+  envError: string | null;
+  cliUpdates: Partial<Record<CodingCli, CliUpdateResult>>;
+  cliUpdateChecking: Partial<Record<CodingCli, boolean>>;
+  cliUpdateErrors: Partial<Record<CodingCli, string>>;
 
   loadSettings: () => Promise<void>;
   preloadEnvCheck: () => void;
+  loadEnvironment: () => Promise<void>;
   refreshEnvCheck: () => Promise<void>;
+  setCodingCli: (cli: CodingCli) => Promise<void>;
+  setOmpApprovalMode: (mode: OmpApprovalMode) => Promise<void>;
   setActiveProvider: (provider: string) => Promise<void>;
   setActiveModel: (model: string) => Promise<void>;
   setActiveMode: (mode: string) => Promise<void>;
@@ -57,11 +68,24 @@ interface SettingsState {
   testApiKey: (provider: string, key: string, baseUrl?: string) => Promise<boolean>;
 }
 
+let environmentRequest: Promise<void> | null = null;
+let environmentRefreshRequest: Promise<void> | null = null;
+const cliUpdateRequests: Partial<Record<CodingCli, Promise<void>>> = {};
+let environmentGeneration = 0;
+
+function environmentErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object" && "message" in error) return String(error.message);
+  return String(error);
+}
+
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   providers: DEFAULT_PROVIDERS,
   activeProvider: "anthropic",
   activeModel: "claude-sonnet-4",
   activeMode: "code",
+  codingCli: "omp",
+  ompApprovalMode: "default",
   theme: "mocha" as Theme,
   editorFontSize: 13,
   terminalFontSize: 14,
@@ -72,26 +96,96 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   onboardingComplete: false,
   loading: true,
   envCache: null,
+  envChecking: false,
+  envError: null,
+  cliUpdates: {},
+  cliUpdateChecking: {},
+  cliUpdateErrors: {},
 
   preloadEnvCheck: () => {
-    ipc.checkEnvironment().then((result) => {
-      set({ envCache: result });
-    }).catch(() => {});
+    void get().loadEnvironment();
   },
 
-  refreshEnvCheck: async () => {
-    try {
-      const result = await ipc.checkEnvironment();
+  loadEnvironment: () => {
+    if (environmentRequest) return environmentRequest;
+    if (get().envCache) return Promise.resolve();
+    const generation = ++environmentGeneration;
+    set({ envChecking: true, envError: null });
+    environmentRequest = ipc.checkEnvironment().then((result) => {
+      if (generation !== environmentGeneration) return;
       set({ envCache: result });
-    } catch {
-      // ignore
-    }
+      // Local readiness never waits for remote metadata. Each CLI has its own
+      // serialized request, and old snapshots cannot publish into a refresh.
+      for (const cli of CODING_CLI_IDS) {
+        const status = result.clis[cli];
+        if (!status.installed || !status.version) continue;
+        const version = status.version;
+        set((state) => ({
+          cliUpdateChecking: { ...state.cliUpdateChecking, [cli]: true },
+        }));
+        const checkUpdate = async () => {
+          if (cliUpdateRequests[cli]) await cliUpdateRequests[cli];
+          if (generation !== environmentGeneration) return;
+          const request = ipc.checkCliUpdate(cli, version).then((update) => {
+            if (generation === environmentGeneration) {
+              set((state) => ({ cliUpdates: { ...state.cliUpdates, [cli]: update } }));
+            }
+          }).catch((error: unknown) => {
+            if (generation === environmentGeneration) {
+              set((state) => ({
+                cliUpdateErrors: { ...state.cliUpdateErrors, [cli]: environmentErrorMessage(error) },
+              }));
+            }
+          }).finally(() => {
+            if (generation === environmentGeneration) {
+              set((state) => ({
+                cliUpdateChecking: { ...state.cliUpdateChecking, [cli]: false },
+              }));
+            }
+          });
+          cliUpdateRequests[cli] = request;
+          await request;
+          if (cliUpdateRequests[cli] === request) delete cliUpdateRequests[cli];
+        };
+        void checkUpdate();
+      }
+    }).catch((error: unknown) => {
+      if (generation === environmentGeneration) {
+        set({ envError: environmentErrorMessage(error) });
+      }
+    }).finally(() => {
+      if (generation === environmentGeneration) set({ envChecking: false });
+      environmentRequest = null;
+    });
+    return environmentRequest;
+  },
+
+  refreshEnvCheck: () => {
+    if (environmentRefreshRequest) return environmentRefreshRequest;
+    environmentRefreshRequest = (async () => {
+      // Invalidate immediately: late local and remote replies from before an
+      // installation must not become visible while we wait for a fresh check.
+      environmentGeneration++;
+      set({
+        envCache: null,
+        envError: null,
+        envChecking: true,
+        cliUpdates: {},
+        cliUpdateChecking: {},
+        cliUpdateErrors: {},
+      });
+      if (environmentRequest) await environmentRequest;
+      await get().loadEnvironment();
+    })().finally(() => {
+      environmentRefreshRequest = null;
+    });
+    return environmentRefreshRequest;
   },
 
   loadSettings: async () => {
     set({ loading: true });
     try {
-      const [providersVal, providerVal, modelVal, modeVal, themeVal, onboardingVal, editorFsVal, terminalFsVal, chatFsVal, scrollbackVal, lineHeightVal, rendererVal] = await Promise.all([
+      const [providersVal, providerVal, modelVal, modeVal, themeVal, onboardingVal, editorFsVal, terminalFsVal, chatFsVal, scrollbackVal, lineHeightVal, rendererVal, codingCliVal, approvalModeVal] = await Promise.all([
         ipc.getSetting("providers"),
         ipc.getSetting("active_provider"),
         ipc.getSetting("active_model"),
@@ -104,6 +198,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         ipc.getSetting("terminal_scrollback"),
         ipc.getSetting("terminal_line_height"),
         ipc.getSetting("terminal_renderer"),
+        ipc.getSetting("coding_cli"),
+        ipc.getSetting("omp_approval_mode"),
       ]);
 
       const theme = (THEME_ORDER.includes(themeVal as Theme) ? themeVal : "mocha") as Theme;
@@ -128,6 +224,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         activeProvider: (providerVal as string) || "anthropic",
         activeModel: (modelVal as string) || "claude-sonnet-4",
         activeMode: (modeVal as string) || "code",
+        codingCli: codingCliVal === "pi" ? "pi" : "omp",
+        ompApprovalMode: approvalModeVal === "always-ask" || approvalModeVal === "auto-approve"
+          ? approvalModeVal : "default",
         theme,
         editorFontSize,
         terminalFontSize,
@@ -141,6 +240,16 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     } catch {
       set({ loading: false });
     }
+  },
+
+  setCodingCli: async (cli) => {
+    await ipc.setSetting("coding_cli", cli);
+    set({ codingCli: cli });
+  },
+
+  setOmpApprovalMode: async (mode) => {
+    await ipc.setSetting("omp_approval_mode", mode);
+    set({ ompApprovalMode: mode });
   },
 
   setActiveProvider: async (provider) => {

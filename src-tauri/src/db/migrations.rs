@@ -3,8 +3,26 @@ use rusqlite::Connection;
 use crate::errors::AppResult;
 
 pub fn run_migrations(conn: &mut Connection) -> AppResult<()> {
+    // 版本控制表（只存一行，id 固定为 1）
     conn.execute_batch(
-        "
+        "CREATE TABLE IF NOT EXISTS schema_version (
+            id      INTEGER PRIMARY KEY CHECK (id = 1),
+            version INTEGER NOT NULL
+        );"
+    )?;
+
+    let current_version: i64 = conn
+        .query_row(
+            "SELECT COALESCE((SELECT version FROM schema_version WHERE id = 1), 0)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    // Version 1: 初始建表
+    if current_version < 1 {
+        conn.execute_batch(
+            "
         CREATE TABLE IF NOT EXISTS projects (
             id            TEXT PRIMARY KEY,
             path          TEXT NOT NULL UNIQUE,
@@ -101,6 +119,18 @@ pub fn run_migrations(conn: &mut Connection) -> AppResult<()> {
             updated_at       INTEGER NOT NULL
         );
         ",
-    )?;
+        )?;
+        conn.execute(
+            "INSERT OR REPLACE INTO schema_version (id, version) VALUES (1, 1)",
+            [],
+        )?;
+    }
+
+    // 未来增量迁移示例：
+    // if current_version < 2 {
+    //     conn.execute_batch("ALTER TABLE ...; ")?;
+    //     conn.execute("UPDATE schema_version SET version = 2 WHERE id = 1", [])?;
+    // }
+
     Ok(())
 }

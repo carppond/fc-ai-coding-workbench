@@ -447,7 +447,7 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
   // 触发输出队列 flush（由可见性 effect 在 tab 切回时调用，桥接到 mount effect 内部）
-  const flushWritesRef = useRef<() => void>(() => {});
+  const flushWritesRef = useRef<(() => void) | null>(null);
   const theme = useSettingsStore((s) => s.theme);
   const terminalFontSize = useSettingsStore((s) => s.terminalFontSize);
   const terminalScrollback = useSettingsStore((s) => s.terminalScrollback);
@@ -547,7 +547,7 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
   // 这里只需排空残余队列、fit（尺寸可能在隐藏期变过）并重绘一次。
   useEffect(() => {
     if (visible) {
-      flushWritesRef.current();
+      flushWritesRef.current?.();
       if (fitAddonRef.current) {
         try {
           fitAddonRef.current.fit();
@@ -680,7 +680,7 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
       if (e.type !== "keydown") return true;
 
       // Shift+Enter → send newline (\n) instead of carriage return (\r)
-      // Allows apps like Claude Code CLI to distinguish "new line" from "submit"
+      // Coding CLIs use LF for a new line and CR for submitting input.
       if (e.key === "Enter" && e.shiftKey) {
         e.preventDefault();
         if (sessionIdRef.current) {
@@ -777,51 +777,66 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
     let unlistenOutputFn: (() => void) | null = null;
     let unlistenExitFn: (() => void) | null = null;
 
-    // 单一有序输出队列：可见与隐藏共用同一队列，避免两条独立 rAF 链并发
-    // 写入导致 CLI 输出错位/花屏。
-    //  - 按帧合批：一帧内到达的多个 chunk 拼成一次 term.write，减少刷屏时的写入次数
-    //  - 隐藏时只入队不 flush（scheduleFlush 在不可见时 no-op），切回 tab 时由
-    //    可见性 effect 调 flushWritesRef 触发，按入队顺序排空
-    //  - 单帧写入预算 256KB：隐藏期积压大量输出后切回，分帧排空避免一次性卡 UI
-    //  - 软上限 8MB 背压：失控输出丢弃最旧 chunk 保护渲染线程
-    let writeQueue: string[] = [];
-    let writeQueueBytes = 0;
-    let writeRaf: number | null = null;
-    const MAX_QUEUE_BYTES = 8 * 1024 * 1024;
-    const MAX_FLUSH_BYTES_PER_FRAME = 256 * 1024;
+    // Backend credits bound all outstanding output, including xterm's own queue.
+    // Acknowledge only after parsing; never drop ANSI data or pause hidden tabs.
+    const writeQueue = new Map<number, ipc.TerminalOutputChunk>();
+    let nextSequence = 1;
+    let outputFlushQueued = false;
+    let writeInProgress = false;
+    let outputFailed = false;
+    const MAX_WRITE_BYTES = 64 * 1024;
+    const failOutput = (error: unknown) => {
+      if (disposed || outputFailed) return;
+      outputFailed = true;
+      writeQueue.clear();
+      console.error("Terminal output failed:", error);
+      onAliveChange?.(false);
+      if (sessionIdRef.current) ipc.killTerminal(sessionIdRef.current).catch(() => {});
+      try { term.write("\r\n[Terminal output failed]\r\n"); } catch { /* disposed */ }
+    };
     const flushWrites = () => {
-      writeRaf = null;
-      if (disposed || writeQueue.length === 0) return;
+      outputFlushQueued = false;
+      if (disposed || outputFailed || writeInProgress || !writeQueue.has(nextSequence)) return;
       let bytes = 0;
+      let sequence = 0;
       const batch: string[] = [];
-      while (writeQueue.length > 0 && bytes < MAX_FLUSH_BYTES_PER_FRAME) {
-        const item = writeQueue.shift()!;
-        batch.push(item);
-        bytes += item.length;
-        writeQueueBytes -= item.length;
+      while (writeQueue.has(nextSequence) && bytes < MAX_WRITE_BYTES) {
+        const item = writeQueue.get(nextSequence)!;
+        writeQueue.delete(nextSequence++);
+        batch.push(item.data);
+        bytes += item.bytes;
+        sequence = item.sequence;
       }
-      try { term.write(batch.join("")); } catch { /* term disposed */ }
-      // 还有积压 → 下一帧继续排空
-      if (writeQueue.length > 0) scheduleFlush();
+      writeInProgress = true;
+      try {
+        term.write(batch.join(""), () => {
+          writeInProgress = false;
+          if (disposed || outputFailed) return;
+          const sessionId = sessionIdRef.current;
+          if (sessionId) {
+            ipc.acknowledgeTerminalOutput(sessionId, sequence).catch(failOutput);
+          }
+          scheduleFlush();
+        });
+      } catch (error) {
+        writeInProgress = false;
+        failOutput(error);
+      }
     };
-    // 始终排空（含隐藏时）：隐藏 tab 也实时写入 xterm，保持与 claude 同步。
-    // 否则隐藏期攒着、切回再一次性回放 claude 的"增量重绘"，起始状态稍有错位即错乱。
-    // 隐藏时 DOM 渲染器不绘制，仅解析 ANSI，CPU 开销极小。
     const scheduleFlush = () => {
-      if (writeRaf == null) {
-        writeRaf = requestAnimationFrame(flushWrites);
+      // xterm already yields while parsing. rAF can stop in background WebViews,
+      // so parsing and credit release must not depend on a paint frame.
+      if (!disposed && !outputFailed && !writeInProgress && !outputFlushQueued && writeQueue.has(nextSequence)) {
+        outputFlushQueued = true;
+        queueMicrotask(flushWrites);
       }
     };
-    const enqueueWrite = (data: string) => {
-      writeQueue.push(data);
-      writeQueueBytes += data.length;
-      // 背压：队列超限丢弃最旧的，保留最新输出
-      while (writeQueueBytes > MAX_QUEUE_BYTES && writeQueue.length > 1) {
-        writeQueueBytes -= writeQueue.shift()!.length;
-      }
+    const enqueueWrite = (chunk: ipc.TerminalOutputChunk) => {
+      if (outputFailed || chunk.sequence < nextSequence) return;
+      // Events may arrive out of order; acknowledge only a contiguous parsed run.
+      writeQueue.set(chunk.sequence, { ...chunk, data: fixGlyphs(chunk.data) });
       scheduleFlush();
     };
-    // 暴露给可见性 effect：tab 切回时触发排空
     flushWritesRef.current = scheduleFlush;
 
     // Safe fit helper — 只在维度真正变化时才 fit，避免滚动时滚动条变化触发的
@@ -846,27 +861,21 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
       shellNameRef.current = shellName;
 
       // Register listeners BEFORE subscribing so no output is lost
-      unlistenOutputFn = await listen<string>(`terminal-output-${sessionId}`, (event) => {
-        if (disposed) return;
-        // 始终入同一队列；隐藏时只积压不 flush，切回 tab 时按序排空
-        enqueueWrite(fixGlyphs(event.payload));
+      unlistenOutputFn = await listen<ipc.TerminalOutputChunk>(`terminal-output-${sessionId}`, (event) => {
+        if (!disposed) enqueueWrite(event.payload);
       });
       if (disposed) { unlistenOutputFn(); return; }
 
       unlistenExitFn = await listen<string>(`terminal-exit-${sessionId}`, () => {
         if (disposed) return;
-        // 走同一队列，确保排在进程最后输出之后（避免退出提示插队到前面）
-        enqueueWrite("\r\n[Process exited]\r\n");
+        // The backend waits for the final parse acknowledgement before exit.
+        term.write("\r\n[Process exited]\r\n");
         onAliveChange?.(false);
       });
       if (disposed) { unlistenExitFn(); return; }
 
-      // Flush any output buffered by Rust while listeners were not ready.
-      // Race with a timeout so the terminal still works if the IPC call stalls.
-      await Promise.race([
-        ipc.terminalSubscribe(sessionId).catch(() => {}),
-        new Promise<void>((r) => setTimeout(r, 2000)),
-      ]);
+      await ipc.terminalSubscribe(sessionId);
+      if (disposed) return;
 
       onAliveChange?.(true);
       onSessionReady?.(sessionId);
@@ -875,7 +884,8 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
       ipc.warmupTerminal(projectPathRef.current ?? undefined).catch(() => {});
     };
 
-    let rafId = requestAnimationFrame(() => {
+    // PTY startup must also progress when an occluded WebView pauses paint frames.
+    queueMicrotask(() => {
       if (disposed) return;
       safeFit();
       // cwd 优先于 projectPath（自选目录终端）
@@ -884,7 +894,10 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
       // Try to claim a pre-warmed terminal first, fallback to normal spawn
       ipc.claimWarmupTerminal(path ?? undefined, term.rows, term.cols)
         .then(async (result) => {
-          if (disposed) return;
+          if (disposed) {
+            if (result) ipc.killTerminal(result[0]).catch(() => {});
+            return;
+          }
           if (result) {
             // Got a pre-warmed session — set up listener & subscribe first, then cd
             await setupSession(result[0], result[1]);
@@ -904,6 +917,7 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
         })
         .catch((err) => {
           if (disposed) return;
+          if (sessionIdRef.current) ipc.killTerminal(sessionIdRef.current).catch(() => {});
           term.write(`\r\n\x1b[31m[Failed to spawn terminal: ${err}]\x1b[0m\r\n`);
           onAliveChange?.(false);
         });
@@ -914,19 +928,17 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
     // the CLI's idea of window size in perfect lockstep — the shell echoes
     // using the same cols it renders into, so input never offsets. Visually,
     // characters may look slightly stretched/squeezed while you drag, but they
-    // snap to the correct layout on mouseup. For TUI apps (vim, claude), they
+    // snap to the correct layout on mouseup. Full-screen TUI applications
     // receive exactly ONE SIGWINCH after the drag settles, not ~60/sec, so full
     // -screen redraws always complete cleanly without tearing or garbage.
     //
     // For non-drag resizes (startup reflow, window resize, font-size change),
-    // the ResizeObserver fires rapidly while layout animates; we fit xterm on
-    // every frame but DEBOUNCE the PTY SIGWINCH 150ms so the shell only sees
-    // the final size.
+    // the ResizeObserver fires rapidly while layout animates; we DEBOUNCE both
+    // fit and PTY SIGWINCH 60ms so the shell only sees the final size.
     //
-    // PTY 行列必须与 xterm 完全一致：TUI 应用（claude/ink、vim）按 PTY 报告的
-    // 行列做绝对光标定位和"清除上面 N 行再重绘"。若 PTY 尺寸 ≠ xterm（例如旧版
-    // 把 PTY 钳到 24x80 而面板更矮/更窄），claude 的重绘行数算错，旧内容清不掉、
-    // 与输入框重叠 → 错乱。这里始终下发 xterm 的真实行列（floor 1 防 0）。
+    // PTY 行列必须与 xterm 完全一致：TUI 按 PTY 报告的行列做绝对定位和重绘。
+    // 若 PTY 尺寸与面板不一致，重绘行数会出错，导致残留内容与输入重叠。
+    // 始终下发 xterm 的真实行列（floor 1 防 0）。
     let isDragging = false;
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
     lastPtySizeRef.current = { cols: Math.max(1, term.cols), rows: Math.max(1, term.rows) };
@@ -948,9 +960,7 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
       if (isDragging) return;
       if (!visibleRef.current) return;
       if (container.clientWidth === 0 || container.clientHeight === 0) return;
-      // 防抖后 fit + PTY 同步一起做，保持 xterm 与 PTY/claude 尺寸锁步。
-      // 否则"xterm 立即变新尺寸、PTY 80ms 后才同步"的窗口期内，TUI（claude/ink）
-      // 会按旧尺寸重绘进新尺寸的 xterm，造成内容错位/重叠（分屏后尤其明显）。
+      // 防抖后一起 fit 和同步 PTY，避免 TUI 按旧尺寸重绘进新尺寸面板。
       if (resizeTimer) clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
         if (disposed || !visibleRef.current) return;
@@ -1000,7 +1010,6 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
 
     return () => {
       disposed = true;
-      cancelAnimationFrame(rafId);
       resizeObserver.disconnect();
       container.removeEventListener("paste", handlePaste, true);
       container.removeEventListener("contextmenu", handleContextMenu);
@@ -1008,7 +1017,10 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
       window.removeEventListener("terminal-drag-end", onDragEnd);
       if (resizeTimer) clearTimeout(resizeTimer);
       if (dragEndTimer) clearTimeout(dragEndTimer);
-      if (writeRaf != null) cancelAnimationFrame(writeRaf);
+      writeQueue.clear();
+      flushWritesRef.current = null;
+      clearTimeout(scrollRepaintTimer ?? undefined);
+      if (observerRafId != null) cancelAnimationFrame(observerRafId);
       if (unlistenOutputFn) unlistenOutputFn();
       if (unlistenExitFn) unlistenExitFn();
       // Notify parent that session is gone

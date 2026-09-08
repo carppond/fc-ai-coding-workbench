@@ -65,6 +65,7 @@ interface FileState {
 
   // 文件编辑器状态
   openFilePath: string | null;
+  openFileVersion: number;
   openFileContent: string | null;
   openFileLine: number | null;
   openFileError: string | null;
@@ -90,6 +91,7 @@ export const useFileStore = create<FileState>((set, get) => ({
   loading: false,
   currentProjectPaths: [],
   openFilePath: null,
+  openFileVersion: 0,
   openFileContent: null,
   openFileLine: null,
   openFileError: null,
@@ -211,14 +213,15 @@ export const useFileStore = create<FileState>((set, get) => ({
 
   /* ── 打开文件 ── */
   openFile: async (filePath: string, line?: number) => {
-    set({ openFilePath: filePath, openFileContent: null, openFileLine: line ?? null, openFileError: null, isDirty: false });
+    const version = get().openFileVersion + 1;
+    set({ openFilePath: filePath, openFileVersion: version, openFileContent: null, openFileLine: line ?? null, openFileError: null, isDirty: false, saving: false });
     try {
       const content = await ipc.readFileContent(filePath);
-      if (get().openFilePath === filePath) {
+      if (get().openFileVersion === version) {
         set({ openFileContent: content });
       }
     } catch (err) {
-      if (get().openFilePath === filePath) {
+      if (get().openFileVersion === version) {
         const msg = err instanceof Error ? err.message : typeof err === "string" ? err : JSON.stringify(err);
         set({ openFileError: msg });
       }
@@ -226,23 +229,25 @@ export const useFileStore = create<FileState>((set, get) => ({
   },
 
   closeFile: () => {
-    set({ openFilePath: null, openFileContent: null, openFileLine: null, openFileError: null, isDirty: false });
+    set({ openFilePath: null, openFileVersion: get().openFileVersion + 1, openFileContent: null, openFileLine: null, openFileError: null, isDirty: false, saving: false });
   },
 
   markDirty: (dirty: boolean) => {
-    set({ isDirty: dirty });
+    if (get().isDirty !== dirty) set({ isDirty: dirty });
   },
 
   saveFile: async (content: string) => {
-    const path = get().openFilePath;
-    if (!path) return false;
+    const { openFilePath: path, openFileVersion: version, saving } = get();
+    if (!path || saving) return false;
     set({ saving: true });
     try {
       await ipc.writeFileContent(path, content);
-      set({ openFileContent: content, isDirty: false, saving: false });
+      if (get().openFileVersion !== version) return false;
+      // 编辑器用保存时的 Text 快照比较当前文档，保存期间的新输入仍需保持脏状态。
+      set({ openFileContent: content, saving: false });
       return true;
     } catch {
-      set({ saving: false });
+      if (get().openFileVersion === version) set({ saving: false });
       return false;
     }
   },
@@ -279,6 +284,7 @@ export const useFileStore = create<FileState>((set, get) => ({
       loading: false,
       currentProjectPaths: [],
       openFilePath: null,
+      openFileVersion: get().openFileVersion + 1,
       openFileContent: null,
       openFileLine: null,
       openFileError: null,

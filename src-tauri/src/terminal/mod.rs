@@ -1,13 +1,19 @@
+mod flow_control;
+
+use flow_control::OutputWindow;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use serde::Serialize;
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::sync::mpsc as std_mpsc;
+use std::sync::{Arc, Mutex};
 use tauri::Emitter;
 
-pub enum PendingItem {
-    Output(String),
-    Exited,
+#[derive(Clone, Serialize)]
+struct TerminalOutput {
+    sequence: u64,
+    bytes: usize,
+    data: String,
 }
 
 /// Find the last valid UTF-8 boundary in a byte slice.
@@ -64,13 +70,13 @@ pub struct TerminalSession {
     alive: Arc<AtomicBool>,
     pub id: String,
     pub shell_name: String,
-    pub pending_output: Arc<Mutex<Vec<PendingItem>>>,
-    pub subscribed: Arc<AtomicBool>,
+    output_window: Arc<OutputWindow>,
 }
 
 impl Drop for TerminalSession {
     fn drop(&mut self) {
         self.alive.store(false, Ordering::Relaxed);
+        self.output_window.close();
         if let Ok(mut child) = self.child.lock() {
             let _ = child.kill();
             let _ = child.wait();
@@ -153,7 +159,7 @@ impl TerminalSession {
         // On Windows, ConPTY intercepts terminal capability queries (Device
         // Attributes, Kitty keyboard protocol, OSC 52, etc.) without forwarding
         // responses. Setting TERM_PROGRAM to an unrecognized value causes TUI
-        // apps (Claude CLI/ink) to probe capabilities and hang or misrender.
+        // apps to probe capabilities and hang or misrender.
         // Use "xterm" on Windows — universally recognized, no special integration
         // logic, and compatible with ConPTY's rendering behavior.
         if cfg!(target_os = "windows") {
@@ -165,15 +171,15 @@ impl TerminalSession {
 
         // --- Cross-shell prompt inhibitors ---
         // These disable third-party prompt tools across all shells.
-        cmd.env("DISABLE_AUTO_UPDATE", "true");         // oh-my-zsh update check
-        cmd.env("DISABLE_UPDATE_PROMPT", "true");        // oh-my-zsh update prompt
-        cmd.env("ZSH_DISABLE_COMPFIX", "true");          // zsh compaudit check
-        cmd.env("STARSHIP_SHELL", "");                   // disable starship detection
-        cmd.env("STARSHIP_SESSION_KEY", "");             // disable starship session
-        cmd.env("VIRTUAL_ENV_DISABLE_PROMPT", "1");      // disable virtualenv prompt
-        cmd.env("CONDA_CHANGEPS1", "false");             // disable conda prompt
-        cmd.env("POSH_THEME", "");                       // disable oh-my-posh theme
-        cmd.env("POWERLINE_COMMAND", "");                 // disable powerline
+        cmd.env("DISABLE_AUTO_UPDATE", "true"); // oh-my-zsh update check
+        cmd.env("DISABLE_UPDATE_PROMPT", "true"); // oh-my-zsh update prompt
+        cmd.env("ZSH_DISABLE_COMPFIX", "true"); // zsh compaudit check
+        cmd.env("STARSHIP_SHELL", ""); // disable starship detection
+        cmd.env("STARSHIP_SESSION_KEY", ""); // disable starship session
+        cmd.env("VIRTUAL_ENV_DISABLE_PROMPT", "1"); // disable virtualenv prompt
+        cmd.env("CONDA_CHANGEPS1", "false"); // disable conda prompt
+        cmd.env("POSH_THEME", ""); // disable oh-my-posh theme
+        cmd.env("POWERLINE_COMMAND", ""); // disable powerline
 
         let user_home = Self::user_home_dir();
 
@@ -216,51 +222,12 @@ impl TerminalSession {
         let output_event = format!("terminal-output-{}", session_id);
         let exit_event = format!("terminal-exit-{}", session_id);
 
-        let pending_output: Arc<Mutex<Vec<PendingItem>>> = Arc::new(Mutex::new(Vec::new()));
-        let subscribed = Arc::new(AtomicBool::new(false));
-        let pending_out = pending_output.clone();
-        let sub = subscribed.clone();
+        let output_window = Arc::new(OutputWindow::default());
+        let flow = Arc::clone(&output_window);
 
-        // Auto-subscribe fallback: if the frontend doesn't call terminal_subscribe
-        // within 3 seconds (e.g. due to IPC issues in packaged builds), force-flush
-        // the buffer and switch to direct emission so the terminal doesn't stay stuck.
-        {
-            let auto_app = app.clone();
-            let auto_pending = pending_output.clone();
-            let auto_sub = subscribed.clone();
-            let auto_output_event = output_event.clone();
-            let auto_exit_event = exit_event.clone();
-            let auto_session_id = session_id.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_secs(3));
-                if auto_sub.load(Ordering::Acquire) {
-                    return;
-                }
-                let mut buf = auto_pending.lock().unwrap();
-                if auto_sub.load(Ordering::Acquire) {
-                    return;
-                }
-                let mut output = String::new();
-                let mut exited = false;
-                for item in buf.drain(..) {
-                    match item {
-                        PendingItem::Output(s) => output.push_str(&s),
-                        PendingItem::Exited => exited = true,
-                    }
-                }
-                auto_sub.store(true, Ordering::Release);
-                drop(buf);
-                if !output.is_empty() {
-                    let _ = auto_app.emit(&auto_output_event, &output);
-                }
-                if exited {
-                    let _ = auto_app.emit(&auto_exit_event, &auto_session_id);
-                }
-            });
-        }
-
-        // Channel for reader → coalescer communication (None = exit signal)
-        let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
+        // A full output window stops the coalescer, then the reader and PTY.
+        // Unclaimed warmup sessions use the same bounded queue until subscribed.
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Option<String>>(8);
 
         // Reader thread — reads from PTY, processes UTF-8, sends to coalescer
         std::thread::spawn(move || {
@@ -283,19 +250,16 @@ impl TerminalSession {
                         } else {
                             combined[..remainder_len]
                                 .copy_from_slice(&remainder_buf[..remainder_len]);
-                            combined[remainder_len..remainder_len + n]
-                                .copy_from_slice(&buf[..n]);
+                            combined[remainder_len..remainder_len + n].copy_from_slice(&buf[..n]);
                             &combined[..remainder_len + n]
                         };
 
                         let (valid_len, leftover) = find_utf8_boundary(bytes);
-                        let data =
-                            String::from_utf8_lossy(&bytes[..valid_len]).into_owned();
+                        let data = String::from_utf8_lossy(&bytes[..valid_len]).into_owned();
 
                         if leftover > 0 {
                             let start = bytes.len() - leftover;
-                            remainder_buf[..leftover]
-                                .copy_from_slice(&bytes[start..]);
+                            remainder_buf[..leftover].copy_from_slice(&bytes[start..]);
                             remainder_len = leftover;
                         } else {
                             remainder_len = 0;
@@ -308,7 +272,7 @@ impl TerminalSession {
                         // Initial phase: filter "Last login:" lines only.
                         // Do NOT drop chunks that are only whitespace/ANSI-escapes —
                         // those carry clear-screen, cursor-move, color-reset sequences
-                        // that TUI apps (vim, claude, ink) rely on for correct layout.
+                        // that TUI apps rely on for correct layout.
                         if initial_phase {
                             chunks_seen += 1;
                             if chunks_seen > 5 {
@@ -325,14 +289,14 @@ impl TerminalSession {
                                     })
                                     .collect::<Vec<_>>()
                                     .join("\n");
-                                if !filtered.is_empty() {
-                                    let _ = tx.send(Some(filtered));
+                                if !filtered.is_empty() && tx.send(Some(filtered)).is_err() {
+                                    break;
                                 }
-                            } else {
-                                let _ = tx.send(Some(data));
+                            } else if tx.send(Some(data)).is_err() {
+                                break;
                             }
-                        } else {
-                            let _ = tx.send(Some(data));
+                        } else if tx.send(Some(data)).is_err() {
+                            break;
                         }
                     }
                     Err(_) => {
@@ -343,43 +307,39 @@ impl TerminalSession {
             }
         });
 
-        // Coalescer thread — batches output with a 2ms window to reduce IPC events.
-        // Before the frontend subscribes, output is buffered in pending_out.
+        // Coalesce for at most 5ms, then reserve credits until xterm parses them.
         std::thread::spawn(move || {
             use std::sync::mpsc::RecvTimeoutError;
             use std::time::{Duration, Instant};
             let coalesce = Duration::from_millis(5);
-            const MAX_PENDING: usize = 10_000;
-            // 单批上限 256KB：超大输出（cat 大文件、刷屏日志）立即冲刷，
-            // 避免 batch 在内存里无限增长造成卡顿/内存膨胀（背压保护）。
-            const MAX_BATCH_BYTES: usize = 256 * 1024;
+            const MAX_BATCH_BYTES: usize = 64 * 1024;
 
-            let emit_or_buffer = |batch: String| {
-                // Lock FIRST, then re-check subscribed — avoids a TOCTOU race with
-                // terminal_subscribe: if we loaded subscribed=false before subscribe
-                // ran drain+flip+unlock, pushing to buf would orphan the data.
-                let mut buf = pending_out.lock().unwrap();
-                let subscribed = sub.load(Ordering::Acquire);
-                if subscribed {
-                    drop(buf);
-                    let _ = app.emit(&output_event, &batch);
-                } else {
-                    if buf.len() < MAX_PENDING {
-                        buf.push(PendingItem::Output(batch));
-                    }
+            let emit_output = |data: String| {
+                let bytes = data.len();
+                let Some(sequence) = flow.reserve(bytes) else {
+                    return false;
+                };
+                if app
+                    .emit(
+                        &output_event,
+                        TerminalOutput {
+                            sequence,
+                            bytes,
+                            data,
+                        },
+                    )
+                    .is_err()
+                {
+                    flow.close();
+                    return false;
                 }
+                true
             };
 
             let handle_exit = || {
                 alive_clone.store(false, Ordering::Relaxed);
-                // Same lock-first ordering as emit_or_buffer to avoid the TOCTOU race
-                let mut buf = pending_out.lock().unwrap();
-                let subscribed = sub.load(Ordering::Acquire);
-                if subscribed {
-                    drop(buf);
+                if flow.wait_until_drained() {
                     let _ = app.emit(&exit_event, &exit_session_id);
-                } else {
-                    buf.push(PendingItem::Exited);
                 }
             };
 
@@ -389,8 +349,7 @@ impl TerminalSession {
                         let mut batch = data;
                         let deadline = Instant::now() + coalesce;
                         loop {
-                            let remaining =
-                                deadline.saturating_duration_since(Instant::now());
+                            let remaining = deadline.saturating_duration_since(Instant::now());
                             if remaining.is_zero() {
                                 break;
                             }
@@ -403,8 +362,8 @@ impl TerminalSession {
                                     }
                                 }
                                 Ok(None) => {
-                                    if !batch.is_empty() {
-                                        emit_or_buffer(batch);
+                                    if !batch.is_empty() && !emit_output(batch) {
+                                        return;
                                     }
                                     handle_exit();
                                     return;
@@ -412,14 +371,14 @@ impl TerminalSession {
                                 Err(RecvTimeoutError::Timeout) => break,
                                 Err(RecvTimeoutError::Disconnected) => {
                                     if !batch.is_empty() {
-                                        emit_or_buffer(batch);
+                                        emit_output(batch);
                                     }
                                     return;
                                 }
                             }
                         }
-                        if !batch.is_empty() {
-                            emit_or_buffer(batch);
+                        if !batch.is_empty() && !emit_output(batch) {
+                            return;
                         }
                     }
                     Ok(None) => {
@@ -441,7 +400,11 @@ impl TerminalSession {
         let (write_tx, write_rx) = std_mpsc::channel::<String>();
         std::thread::spawn(move || {
             let mut writer = writer;
-            let chunk_size: usize = if cfg!(target_os = "windows") { 4096 } else { 65536 };
+            let chunk_size: usize = if cfg!(target_os = "windows") {
+                4096
+            } else {
+                65536
+            };
             for data in write_rx {
                 let bytes = data.as_bytes();
                 if bytes.len() > chunk_size {
@@ -466,14 +429,25 @@ impl TerminalSession {
             alive,
             id: session_id,
             shell_name: shell_name.clone(),
-            pending_output,
-            subscribed,
+            output_window,
         })
+    }
+
+    pub fn subscribe_output(&self) {
+        self.output_window.subscribe();
+    }
+
+    pub fn acknowledge_output(&self, sequence: u64) -> Result<(), String> {
+        self.output_window.acknowledge(sequence)
     }
 
     /// 获取 shell 子进程 PID
     pub fn child_pid(&self) -> Option<u32> {
         self.child.lock().ok()?.process_id()
+    }
+
+    pub fn is_alive(&self) -> bool {
+        self.alive.load(Ordering::Acquire)
     }
 
     pub fn write(&self, data: &str) -> Result<(), String> {
@@ -483,7 +457,10 @@ impl TerminalSession {
     }
 
     pub fn resize(&self, rows: u16, cols: u16) -> Result<(), String> {
-        let master = self.master.lock().map_err(|_| "Master lock poisoned".to_string())?;
+        let master = self
+            .master
+            .lock()
+            .map_err(|_| "Master lock poisoned".to_string())?;
         master
             .resize(PtySize {
                 rows,
@@ -587,8 +564,7 @@ rm -rf "{zdotdir}" 2>/dev/null
 
     /// bash: --rcfile with PROMPT_COMMAND self-healing.
     fn setup_bash_prompt(cmd: &mut CommandBuilder, user_home: &str, session_id: &str) {
-        let init_file =
-            std::env::temp_dir().join(format!(".shiguang_bash_{}", session_id));
+        let init_file = std::env::temp_dir().join(format!(".shiguang_bash_{}", session_id));
         let bash_content = format!(
             r#"# Source user's bash configs
 [ -f "{home}/.bash_profile" ] && source "{home}/.bash_profile"
@@ -620,19 +596,10 @@ rm -f "{init}" 2>/dev/null
         cmd.args(["--rcfile", init_file.to_string_lossy().as_ref()]);
     }
 
-    /// fish: use --init-command for prompt override.
-    /// Fish evaluates --init-command before config files, so we also set
-    /// fish_prompt as a universal function via the env-based disable flags.
-    fn setup_fish_prompt(_cmd: &mut CommandBuilder, user_home: &str, _session_id: &str) {
-        // Fish doesn't have a --rcfile equivalent. The best approach is to
-        // create a conf.d snippet that loads last (alphabetical order).
-        let conf_dir = format!("{}/.config/fish/conf.d", user_home);
-        let snippet_path = format!("{}/99-shiguang.fish", conf_dir);
-
-        // Create conf.d dir if needed, write override snippet
-        if std::fs::create_dir_all(&conf_dir).is_ok() {
-            let fish_content = r#"# ShiGuang AI terminal prompt override
-# This file is auto-managed. Delete it to restore your normal prompt.
+    /// fish: 写入临时文件并用 --init-command source 后自删，避免残留到用户 config 目录
+    fn setup_fish_prompt(cmd: &mut CommandBuilder, _user_home: &str, session_id: &str) {
+        let snippet_path = std::env::temp_dir().join(format!("shiguang_fish_{}.fish", session_id));
+        let fish_content = r#"# ShiGuang AI terminal prompt override (auto-cleaned)
 if set -q AI_WORKBENCH_TERMINAL
     function fish_prompt
         set_color brblue
@@ -644,8 +611,14 @@ if set -q AI_WORKBENCH_TERMINAL
     function fish_greeting; end
 end
 "#;
-            let _ = std::fs::write(&snippet_path, fish_content);
-        }
+        let _ = std::fs::write(&snippet_path, fish_content);
+        // 用 --init-command source 临时文件并自删
+        let init = format!(
+            "source '{}'; rm -f '{}'",
+            snippet_path.display(),
+            snippet_path.display(),
+        );
+        cmd.args(["--init-command", &init]);
     }
 
     /// PowerShell (pwsh/powershell): use -Command to override prompt function.
@@ -667,9 +640,9 @@ end
             concat!(
                 "if (Test-Path '{}') {{ . '{}' }}; ",
                 "function global:prompt {{ ",
-                    "$dir = Split-Path -Leaf (Get-Location); ",
-                    "Write-Host -NoNewline -ForegroundColor Cyan $dir; ",
-                    "return ' $ ' ",
+                "$dir = Split-Path -Leaf (Get-Location); ",
+                "Write-Host -NoNewline -ForegroundColor Cyan $dir; ",
+                "return ' $ ' ",
                 "}}; ",
                 "Clear-Host"
             ),
@@ -690,6 +663,7 @@ end
                 let name_str = name.to_string_lossy();
                 if name_str.starts_with("shiguang_zsh_")
                     || name_str.starts_with(".shiguang_bash_")
+                    || name_str.starts_with("shiguang_fish_")
                 {
                     let _ = std::fs::remove_dir_all(entry.path());
                 }

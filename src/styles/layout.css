@@ -218,174 +218,6 @@
   word-break: break-all;
 }
 
-/* Claude Code 扩展命令安装器 */
-.command-installer {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-
-.command-installer__panel {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  width: 320px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
-  z-index: 999;
-  overflow: hidden;
-}
-
-.command-installer__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 14px 8px;
-  border-bottom: 1px solid var(--border);
-}
-
-.command-installer__title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.command-installer__body {
-  padding: 10px 14px;
-  max-height: 60vh;
-  overflow-y: auto;
-}
-
-.command-installer__card {
-  padding: 8px 0;
-}
-
-.command-installer__card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 4px;
-}
-
-.command-installer__card-name {
-  font-size: 13px;
-  font-weight: 600;
-  font-family: "SF Mono", "Menlo", "Consolas", monospace;
-  color: var(--text-primary);
-}
-
-.command-installer__status {
-  font-size: 11px;
-  padding: 1px 6px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-}
-
-.command-installer__status--installed {
-  background: color-mix(in srgb, var(--success) 15%, transparent);
-  color: var(--success);
-}
-
-.command-installer__card-desc {
-  font-size: 12px;
-  color: var(--text-secondary);
-  margin: 0 0 8px;
-  line-height: 1.4;
-}
-
-.command-installer__help-btn {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  opacity: 0.6;
-  transition: opacity var(--transition-fast), color var(--transition-fast);
-}
-
-.command-installer__help-btn:hover {
-  opacity: 1;
-  color: var(--accent);
-}
-
-.command-installer__usage {
-  margin: 0 0 8px;
-  padding: 8px 10px;
-  background: var(--bg-tertiary);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-}
-
-.command-installer__usage-title {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  margin-bottom: 6px;
-}
-
-.command-installer__usage-item {
-  display: block;
-  font-size: 11px;
-  font-family: "SF Mono", "Menlo", "Consolas", monospace;
-  color: var(--text-primary);
-  padding: 3px 0;
-  line-height: 1.4;
-  word-break: break-all;
-}
-
-.command-installer__usage-item + .command-installer__usage-item {
-  border-top: 1px solid var(--border);
-  margin-top: 3px;
-  padding-top: 6px;
-}
-
-.command-installer__card-actions {
-  display: flex;
-  gap: 6px;
-}
-
-.command-installer__card-actions .btn {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.command-installer__hint {
-  padding: 8px 14px 10px;
-  font-size: 11px;
-  color: var(--text-tertiary);
-  border-top: 1px solid var(--border);
-  line-height: 1.4;
-}
-
-.command-installer__toast {
-  position: fixed;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--success);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
-  font-size: 13px;
-  color: var(--success);
-  z-index: 10000;
-  animation: command-toast-in 0.2s ease-out;
-}
-
-@keyframes command-toast-in {
-  from { opacity: 0; transform: translateX(-50%) translateY(10px); }
-  to { opacity: 1; transform: translateX(-50%) translateY(0); }
-}
 
 /* ========================================
    AppShell
@@ -2204,6 +2036,7 @@
 }
 .env-card__method {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   margin-top: 10px;
@@ -2714,12 +2547,37 @@
   overflow-x: auto;
 }
 
-.cc-launch-btn {
+.cli-launcher {
   display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.cli-launcher__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.cli-launcher__hint {
+  flex-basis: 100%;
+  color: var(--warning);
+  font-size: 11px;
+}
+
+.cli-launch-btn {
+  display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 10px;
-  border: none;
+  padding: 5px 10px;
+  border: 1px solid transparent;
   border-radius: 6px;
   background: var(--accent);
   color: #fff;
@@ -2727,38 +2585,77 @@
   font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
-  flex-shrink: 0;
-  transition: opacity 0.15s;
 }
 
-.cc-launch-btn:hover {
-  opacity: 0.85;
-}
+.cli-launch-btn:hover:not(:disabled) { opacity: 0.85; }
+.cli-launch-btn:active:not(:disabled) { opacity: 0.7; }
+.cli-launch-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
-.cc-launch-btn:active {
-  opacity: 0.7;
-}
-
-/* 自动编辑：描边样式，区别于实心的「开启CC」主按钮 */
-.cc-launch-btn--accept {
-  margin-right: 6px;
+.cli-launch-btn--ghost {
   background: transparent;
-  border: 1px solid var(--accent);
-  color: var(--accent);
-}
-
-/* 继续上次 / 恢复会话：弱化的次要操作 */
-.cc-launch-btn--ghost {
-  margin-right: 6px;
-  background: transparent;
-  border: 1px solid var(--border);
+  border-color: var(--border);
   color: var(--text-muted);
 }
 
-.cc-launch-btn--ghost:hover {
-  opacity: 1;
+.cli-launch-btn--ghost:hover:not(:disabled) {
   color: var(--text);
   border-color: var(--text-muted);
+}
+
+.coding-cli-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.coding-cli-settings__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.coding-cli-settings__label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.coding-cli-settings__select {
+  min-width: 80px;
+  max-width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.coding-cli-settings__select:focus-visible {
+  outline: 1px solid var(--accent);
+}
+
+.coding-cli-settings__hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.coding-cli-settings--compact {
+  flex: 1 1 260px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 12px;
+}
+
+.coding-cli-settings--compact .coding-cli-settings__hint {
+  flex-basis: 100%;
 }
 
 .panel-tab__label {

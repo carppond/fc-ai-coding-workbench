@@ -1,3 +1,4 @@
+mod coding_cli;
 mod commands;
 mod db;
 mod errors;
@@ -19,9 +20,12 @@ pub fn run() {
         .setup(|app| {
             let app_state = AppState::new(app.handle())?;
             app.manage(app_state);
+            app.manage(coding_cli::CliLaunchConfig::new()?);
             app.manage(commands::terminal_commands::TerminalState {
                 sessions: std::sync::Mutex::new(std::collections::HashMap::new()),
-                warmup: std::sync::Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
+                warmup: std::sync::Arc::new(std::sync::Mutex::new(
+                    std::collections::VecDeque::new(),
+                )),
             });
 
             // 后台清理上次残留的临时文件（不阻塞启动）
@@ -29,7 +33,7 @@ pub fn run() {
                 terminal::TerminalSession::cleanup_stale_temp_files();
             });
 
-            // 后台线程预加载 shell 环境变量（供 claude -p 使用，不阻塞启动）
+            // Preload the login-shell environment for coding CLI print requests.
             commands::provider_commands::preload_shell_env();
 
             // 后台设置应用图标（不阻塞窗口显示）
@@ -131,14 +135,11 @@ pub fn run() {
             commands::project_commands::search_in_files,
             commands::project_commands::show_in_folder,
             // Env commands
-            commands::env_commands::write_env_to_shell,
-            commands::env_commands::get_shell_config_path,
             commands::env_commands::detect_platform,
-            commands::env_commands::get_claude_resume_enabled,
-            commands::env_commands::set_claude_resume_enabled,
             commands::env_commands::fetch_url,
             // Setup commands
             commands::setup_commands::check_environment,
+            commands::setup_commands::check_cli_update,
             commands::setup_commands::run_install_command,
             // Terminal commands
             commands::terminal_commands::spawn_terminal,
@@ -146,10 +147,11 @@ pub fn run() {
             commands::terminal_commands::resize_terminal,
             commands::terminal_commands::kill_terminal,
             commands::terminal_commands::terminal_cd,
-            commands::terminal_commands::is_terminal_idle,
+            commands::terminal_commands::launch_coding_cli,
             commands::terminal_commands::warmup_terminal,
             commands::terminal_commands::claim_warmup_terminal,
             commands::terminal_commands::terminal_subscribe,
+            commands::terminal_commands::acknowledge_terminal_output,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -2,14 +2,12 @@ import { useState, useEffect } from "react";
 import { useSettingsStore, type Theme } from "../../stores/settingsStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useI18n } from "../../lib/i18n";
-import { useConfirm } from "../common/ConfirmDialog";
-import * as ipc from "../../ipc/commands";
-import type { EnvCheckResult } from "../../ipc/commands";
+import { CodingCliSettings } from "../common/CodingCliSettings";
 import { EnvironmentSetup } from "../common/EnvironmentSetup";
 
-type Step = "welcome" | "environment" | "apiConfig" | "theme" | "project";
+type Step = "welcome" | "environment" | "cliConfig" | "theme" | "project";
 
-const STEPS: Step[] = ["welcome", "environment", "apiConfig", "theme", "project"];
+const STEPS: Step[] = ["welcome", "environment", "cliConfig", "theme", "project"];
 
 const THEME_COLORS: Record<Theme, { name: string; colors: string[] }> = {
   mocha: { name: "Mocha", colors: ["#1e1e2e", "#89b4fa", "#a6e3a1", "#f38ba8"] },
@@ -31,31 +29,16 @@ const THEME_COLORS: Record<Theme, { name: string; colors: string[] }> = {
 
 export function SetupWizard() {
   const [step, setStep] = useState<Step>("welcome");
-  const { theme, setTheme, setOnboardingComplete } = useSettingsStore();
+  const { theme, setTheme, setOnboardingComplete, preloadEnvCheck } = useSettingsStore();
   const { activeProject, openProject } = useProjectStore();
   const { t } = useI18n();
-  const { confirm } = useConfirm();
 
   // Preload environment detection on wizard mount (background)
-  const [preloadedEnv, setPreloadedEnv] = useState<EnvCheckResult | null>(null);
   useEffect(() => {
-    ipc.checkEnvironment().then(setPreloadedEnv).catch(() => {});
-  }, []);
-
-  // API config state
-  const [baseUrl, setBaseUrl] = useState("");
-  const [authToken, setAuthToken] = useState("");
-  const [platform, setPlatform] = useState("macos");
-  const [shellConfigPath, setShellConfigPath] = useState("~/.zshrc");
-  const [writeStatus, setWriteStatus] = useState<"idle" | "success" | "error">("idle");
-  const [writtenPath, setWrittenPath] = useState("");
+    preloadEnvCheck();
+  }, [preloadEnvCheck]);
 
   const stepIndex = STEPS.indexOf(step);
-
-  useEffect(() => {
-    ipc.detectPlatform().then(setPlatform).catch(() => {});
-    ipc.getShellConfigPath().then(setShellConfigPath).catch(() => {});
-  }, []);
 
   const handleNext = () => {
     const next = STEPS[stepIndex + 1];
@@ -69,40 +52,6 @@ export function SetupWizard() {
 
   const handleFinish = async () => {
     await setOnboardingComplete(true);
-  };
-
-  // Build preview content
-  const previewBaseUrl = baseUrl || "https://api.anthropic.com";
-  const previewToken = authToken || "sk-ant-...";
-  const previewLines =
-    platform === "windows"
-      ? [
-          `setx ANTHROPIC_BASE_URL "${previewBaseUrl}"`,
-          `setx ANTHROPIC_AUTH_TOKEN "${previewToken}"`,
-        ]
-      : [
-          `export ANTHROPIC_BASE_URL="${previewBaseUrl}"`,
-          `export ANTHROPIC_AUTH_TOKEN="${previewToken}"`,
-        ];
-
-  const handleWriteConfig = async () => {
-    if (!baseUrl && !authToken) return;
-    const content = previewLines.join("\n");
-    const msg = t("wizard.writeConfirm")
-      .replace("{path}", shellConfigPath)
-      .replace("{content}", content);
-    if (!(await confirm({ title: t("wizard.apiConfig"), message: msg }))) return;
-
-    try {
-      const path = await ipc.writeEnvToShell(
-        baseUrl || "https://api.anthropic.com",
-        authToken
-      );
-      setWrittenPath(path);
-      setWriteStatus("success");
-    } catch {
-      setWriteStatus("error");
-    }
   };
 
   return (
@@ -143,7 +92,7 @@ export function SetupWizard() {
             <div className="wizard__title">{t("wizard.environment")}</div>
             <div className="wizard__subtitle">{t("wizard.environmentSubtitle")}</div>
 
-            <EnvironmentSetup preloadedEnv={preloadedEnv} />
+            <EnvironmentSetup />
 
             <div className="wizard__actions">
               <button className="btn btn--ghost" onClick={handleBack}>
@@ -159,117 +108,13 @@ export function SetupWizard() {
           </>
         )}
 
-        {/* Step 3: API Config */}
-        {step === "apiConfig" && (
+        {/* Step 3: Coding CLI */}
+        {step === "cliConfig" && (
           <>
-            <div className="wizard__title">{t("wizard.apiConfig")}</div>
-            <div className="wizard__subtitle">{t("wizard.apiConfigSubtitle")}</div>
-
-            <div className="wizard__field">
-              <label className="wizard__label">{t("wizard.baseUrl")}</label>
-              <input
-                className="wizard__input"
-                type="text"
-                placeholder={t("wizard.baseUrlPlaceholder")}
-                value={baseUrl}
-                onChange={(e) => setBaseUrl(e.target.value)}
-              />
-            </div>
-
-            <div className="wizard__field">
-              <label className="wizard__label">{t("wizard.authToken")}</label>
-              <input
-                className="wizard__input"
-                type="password"
-                placeholder="sk-ant-..."
-                value={authToken}
-                onChange={(e) => setAuthToken(e.target.value)}
-              />
-            </div>
-
-            {/* Preview */}
-            {(baseUrl || authToken) && (
-              <div
-                style={{
-                  marginBottom: 16,
-                  padding: "12px 14px",
-                  background: "var(--bg-primary)",
-                  borderRadius: "var(--radius-md)",
-                  border: "1px solid var(--border)",
-                  fontSize: 12,
-                  fontFamily: '"SF Mono", monospace',
-                  overflowX: "auto",
-                  wordBreak: "break-all",
-                  overflowWrap: "break-word",
-                }}
-              >
-                <div style={{ color: "var(--text-muted)", marginBottom: 8, fontFamily: "inherit", fontSize: 11 }}>
-                  {t("wizard.preview")} <strong>{shellConfigPath}</strong>
-                </div>
-                {previewLines.map((line, i) => (
-                  <div key={i} style={{ color: "var(--text-secondary)", wordBreak: "break-all" }}>{line}</div>
-                ))}
-              </div>
-            )}
-
-            {/* Write button */}
-            {(baseUrl || authToken) && writeStatus === "idle" && (
-              <button
-                className="btn btn--primary btn--sm"
-                onClick={handleWriteConfig}
-                style={{ marginBottom: 12 }}
-              >
-                {t("wizard.writeToShell")}
-              </button>
-            )}
-
-            {/* Success message */}
-            {writeStatus === "success" && (
-              <div
-                style={{
-                  padding: "10px 14px",
-                  marginBottom: 12,
-                  background: "rgba(166, 227, 161, 0.1)",
-                  border: "1px solid var(--success)",
-                  borderRadius: "var(--radius-md)",
-                  fontSize: 13,
-                  color: "var(--success)",
-                }}
-              >
-                <div style={{ fontWeight: 500, marginBottom: 4 }}>
-                  {t("wizard.writeSuccess").replace("{path}", writtenPath)}
-                </div>
-                <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
-                  {t("wizard.writeHintAuto")}
-                </div>
-                {platform !== "windows" && (
-                  <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
-                    {t("wizard.writeHintExternal").replace("{path}", writtenPath)}
-                  </div>
-                )}
-                {platform === "windows" && (
-                  <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
-                    {t("wizard.writeHintWindows")}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {writeStatus === "error" && (
-              <div
-                style={{
-                  padding: "10px 14px",
-                  marginBottom: 12,
-                  background: "rgba(243, 139, 168, 0.1)",
-                  border: "1px solid var(--error)",
-                  borderRadius: "var(--radius-md)",
-                  fontSize: 13,
-                  color: "var(--error)",
-                }}
-              >
-                Failed to write config file
-              </div>
-            )}
+            <div className="wizard__title">{t("cli.setupTitle")}</div>
+            <div className="wizard__subtitle">{t("cli.setupSubtitle")}</div>
+            <CodingCliSettings />
+            <p className="coding-cli-settings__hint">{t("cli.setupPreservation")}</p>
 
             <div className="wizard__actions">
               <button className="btn btn--ghost" onClick={handleBack}>

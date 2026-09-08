@@ -6,17 +6,31 @@ A desktop coding assistant integrating AI chat, Git workflow, and terminal, buil
 
 ## Features
 
-- **AI Chat (In Development)** — Pre-built interfaces for Anthropic Claude and OpenAI models; currently uses the built-in terminal to run Claude CLI for AI-assisted coding
+- **AI Chat (In Development)** — Anthropic Claude and OpenAI provider interfaces remain available; terminal-based coding uses OMP or Pi
 - **Git Integration** — File-level staging/unstaging, commit, push/pull, branch tracking, commit log, diff preview
-- **Built-in Terminal** — Multi-tab terminal supporting zsh/bash/fish/PowerShell with custom prompt and full keyboard shortcut support
+- **Built-in Terminal** — Multi-tab terminal supporting zsh/bash/fish/PowerShell with custom prompt and full keyboard shortcut support; bounded output flow control preserves ordered ANSI data in hidden tabs
 - **File Management** — Project file tree browsing, search, create/rename/delete
+- **File Editing** — CodeMirror editing with undo-aware saved snapshots; large files use a lightweight mode that retains editing, search, undo and save
+- **Environment Checks** — Local tool detection is independent of background update checks, with shared requests and subprocess deadlines
 - **Network Proxy** — HTTP/HTTPS/SOCKS5 proxy support, one-click apply to Git, npm, terminal, and API requests
-- **Claude Resume Auto-Save** — Automatically saves the resume command when exiting Claude CLI (macOS/Linux)
+- **Coding CLI Sessions** — OMP by default, remembered CLI selection, and New / Continue / Choose session actions; approval controls follow each CLI's capabilities
 - **Multiple Themes** — 14 built-in themes (Catppuccin Mocha/Latte, Dracula, Nord, Tokyo Night, etc.)
 - **Bilingual UI** — Switch between Chinese and English with one click
-- **Secure Storage** — API keys encrypted via system keychain
+- **Secure Storage** — In-app provider API keys use the system keychain; OMP and Pi retain their own authentication and model configuration
+
+## Coding CLI workflow
+
+- Choose OMP or Pi in the terminal toolbar or settings. The selection persists independently of the AI provider/model settings; Claude models remain supported.
+- The three actions use the current terminal pane's working directory. Busy or unverifiable terminals reject launches rather than injecting commands into a running TUI.
+- **New** always starts fresh. For OMP, a temporary per-run `autoResume: false` overlay prevents a global auto-resume preference from changing this action; the user's configuration is not rewritten.
+- **Continue** uses `--continue`; **Choose session** opens the CLI's `--resume` picker. Histories remain managed separately by each CLI.
+- OMP offers Follow configuration, Ask every time, and Auto-approve all tools. The last option includes command execution and requires explicit confirmation. Pi has no equivalent selector; its `--approve` flag is project trust, not per-tool approval.
+- Commit-message generation uses the selected CLI in ephemeral, tool-free print mode. It produces text only and does not run `omp commit` or create a Git commit.
+- Existing Claude Code files, shell configuration, credentials and histories are left untouched. The old app-managed resume hook and command installer are no longer active.
 
 ## Screenshots
+
+These images show an earlier UI; the current CLI controls are described above.
 
 | Main Interface | Memory Guide | Settings |
 |:-:|:-:|:-:|
@@ -44,6 +58,7 @@ A desktop coding assistant integrating AI chat, Git workflow, and terminal, buil
   - macOS: Xcode Command Line Tools
   - Windows: [WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/), Visual Studio Build Tools
   - Linux: `libwebkit2gtk-4.1-dev libgtk-3-dev libappindicator3-dev librsvg2-dev patchelf`
+- **Coding CLI runtime** — Native OMP needs neither Node.js nor Bun. Its Bun installation channel needs Bun >= 1.3.14; Pi's npm package needs Node.js >= 22.19.0 and npm.
 
 ## Quick Start
 
@@ -126,7 +141,7 @@ Build Artifacts:
 
 ## Notes
 
-1. **API Key Security** — Keys are stored in the system keychain and never written to config files or the database
+1. **API Key Security** — In-app provider keys remain in the system keychain. CLI login and model settings belong to OMP/Pi; the app does not copy keys or write shell API variables.
 2. **Proxy Settings** — Proxy configuration in the settings panel is persisted to the database and auto-restored on restart
 3. **Terminal Environment** — The built-in terminal inherits the system shell environment with a custom prompt; delete the corresponding temp file to restore the original prompt
 4. **Git Operations** — To prevent accidental operations, staging automatically filters out `node_modules`, `.git`, `target`, and similar directories

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { CodingCli, CliLaunchAction, OmpApprovalMode } from "../lib/codingCli";
 import type {
   Workspace,
   Project,
@@ -259,8 +260,8 @@ export const gitCreateBranch = (projectPath: string, branchName: string) =>
 export const gitDeleteBranch = (projectPath: string, branchName: string, force: boolean) =>
   invoke<void>("git_delete_branch", { projectPath, branchName, force });
 
-export const generateCommitMessage = (projectPath: string) =>
-  invoke<string>("generate_commit_message", { projectPath });
+export const generateCommitMessage = (projectPath: string, cli: CodingCli) =>
+  invoke<string>("generate_commit_message", { projectPath, cli });
 
 // --- Git Stash ---
 
@@ -309,8 +310,12 @@ export const readDirectoryTree = (path: string, maxDepth?: number) =>
 export const readDirectoryChildren = (path: string) =>
   invoke<DirEntry[]>("read_directory_children", { path });
 
-export const readFileContent = (path: string, maxSize?: number) =>
-  invoke<string>("read_file_content", { path, maxSize });
+const fileTextDecoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+
+export const readFileContent = async (path: string, maxSize?: number): Promise<string> => {
+  const data = await invoke<ArrayBuffer>("read_file_content", { path, maxSize });
+  return fileTextDecoder.decode(data);
+};
 
 export const writeFileContent = (path: string, content: string) =>
   invoke<void>("write_file_content", { path, content });
@@ -341,25 +346,21 @@ export const listAllFiles = (projectPath: string) =>
 
 // --- Env ---
 
-export const writeEnvToShell = (baseUrl: string, authToken: string) =>
-  invoke<string>("write_env_to_shell", { baseUrl, authToken });
-
-export const getShellConfigPath = () =>
-  invoke<string>("get_shell_config_path");
 
 export const detectPlatform = () =>
   invoke<string>("detect_platform");
 
-export const getClaudeResumeEnabled = () =>
-  invoke<boolean>("get_claude_resume_enabled");
-
-export const setClaudeResumeEnabled = (enabled: boolean) =>
-  invoke<string>("set_claude_resume_enabled", { enabled });
 
 export const fetchUrl = (url: string) =>
   invoke<string>("fetch_url", { url });
 
 // --- Setup ---
+
+export interface CliStatus {
+  installed: boolean;
+  version: string | null;
+  install_method: string | null;
+}
 
 export interface EnvCheckResult {
   git_installed: boolean;
@@ -369,21 +370,33 @@ export interface EnvCheckResult {
   npm_installed: boolean;
   npm_version: string | null;
   brew_installed: boolean;
-  claude_installed: boolean;
-  claude_version: string | null;
-  claude_install_method: string | null; // "npm" | "brew"
-  claude_latest_version: string | null;
-  claude_update_available: boolean;
+  bun_installed: boolean;
+  bun_version: string | null;
+  clis: Record<CodingCli, CliStatus>;
   platform: string;
+}
+
+export interface CliUpdateResult {
+  latest_version: string;
+  update_available: boolean;
 }
 
 export const checkEnvironment = () =>
   invoke<EnvCheckResult>("check_environment");
 
-export const runInstallCommand = (commandType: string, method: string) =>
-  invoke<void>("run_install_command", { commandType, method });
+export const checkCliUpdate = (cli: CodingCli, installedVersion: string) =>
+  invoke<CliUpdateResult>("check_cli_update", { cli, installedVersion });
+
+export const runInstallCommand = (commandType: string, method: string, cli?: CodingCli) =>
+  invoke<void>("run_install_command", { commandType, method, cli });
 
 // --- Terminal ---
+
+export interface TerminalOutputChunk {
+  sequence: number;
+  bytes: number;
+  data: string;
+}
 
 export const spawnTerminal = (initialDir?: string, rows?: number, cols?: number) =>
   invoke<[string, string]>("spawn_terminal", { initialDir, rows, cols });
@@ -400,8 +413,12 @@ export const killTerminal = (sessionId: string) =>
 export const terminalCd = (sessionId: string, path: string) =>
   invoke<void>("terminal_cd", { sessionId, path });
 
-export const isTerminalIdle = (sessionId: string) =>
-  invoke<boolean>("is_terminal_idle", { sessionId });
+export const launchCodingCli = (
+  sessionId: string,
+  cli: CodingCli,
+  action: CliLaunchAction,
+  approval: OmpApprovalMode,
+) => invoke<void>("launch_coding_cli", { sessionId, cli, action, approval });
 
 export const warmupTerminal = (initialDir?: string) =>
   invoke<void>("warmup_terminal", { initialDir });
@@ -411,3 +428,6 @@ export const claimWarmupTerminal = (initialDir?: string, rows?: number, cols?: n
 
 export const terminalSubscribe = (sessionId: string) =>
   invoke<void>("terminal_subscribe", { sessionId });
+
+export const acknowledgeTerminalOutput = (sessionId: string, sequence: number) =>
+  invoke<void>("acknowledge_terminal_output", { sessionId, sequence });

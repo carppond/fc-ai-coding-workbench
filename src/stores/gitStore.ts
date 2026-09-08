@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { GitFileStatus, GitBranchInfo, GitLogEntry, BranchListItem, StashEntry, TagEntry } from "../lib/types";
 import * as ipc from "../ipc/commands";
+import { useSettingsStore } from "./settingsStore";
 
 function extractErrorMessage(e: unknown): string {
   if (e && typeof e === "object" && "message" in e && typeof (e as Record<string, unknown>).message === "string") {
@@ -721,7 +722,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     if (get().generating) return false;
     set({ generating: true, error: null });
     try {
-      const msg = await ipc.generateCommitMessage(projectPath);
+      const msg = await ipc.generateCommitMessage(projectPath, useSettingsStore.getState().codingCli);
       set({ commitMessage: msg, generating: false });
       // 同步到 repoStates
       get().setRepoCommitMessage(projectPath, msg);

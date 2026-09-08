@@ -5,7 +5,9 @@ use crate::state::AppState;
 use tauri::State;
 
 /// Helper: lock the DB mutex, converting a poisoned lock into an AppError.
-fn lock_db<'a>(state: &'a State<'a, AppState>) -> AppResult<std::sync::MutexGuard<'a, rusqlite::Connection>> {
+fn lock_db<'a>(
+    state: &'a State<'a, AppState>,
+) -> AppResult<std::sync::MutexGuard<'a, rusqlite::Connection>> {
     state
         .db
         .lock()
@@ -15,7 +17,11 @@ fn lock_db<'a>(state: &'a State<'a, AppState>) -> AppResult<std::sync::MutexGuar
 // --- Projects ---
 
 #[tauri::command]
-pub fn create_project(state: State<AppState>, path: String, name: String) -> AppResult<db::projects::Project> {
+pub fn create_project(
+    state: State<AppState>,
+    path: String,
+    name: String,
+) -> AppResult<db::projects::Project> {
     let conn = lock_db(&state)?;
     db::projects::create_project(&conn, &path, &name)
 }
@@ -53,7 +59,10 @@ pub fn delete_project(state: State<AppState>, id: String) -> AppResult<()> {
 // --- Workspaces ---
 
 #[tauri::command]
-pub fn create_workspace(state: State<AppState>, name: String) -> AppResult<db::workspaces::Workspace> {
+pub fn create_workspace(
+    state: State<AppState>,
+    name: String,
+) -> AppResult<db::workspaces::Workspace> {
     let conn = lock_db(&state)?;
     db::workspaces::create_workspace(&conn, &name)
 }
@@ -65,13 +74,21 @@ pub fn list_workspaces(state: State<AppState>) -> AppResult<Vec<db::workspaces::
 }
 
 #[tauri::command]
-pub fn get_workspace(state: State<AppState>, id: String) -> AppResult<Option<db::workspaces::Workspace>> {
+pub fn get_workspace(
+    state: State<AppState>,
+    id: String,
+) -> AppResult<Option<db::workspaces::Workspace>> {
     let conn = lock_db(&state)?;
     db::workspaces::get_workspace(&conn, &id)
 }
 
 #[tauri::command]
-pub fn update_workspace(state: State<AppState>, id: String, name: String, project_ids_json: String) -> AppResult<()> {
+pub fn update_workspace(
+    state: State<AppState>,
+    id: String,
+    name: String,
+    project_ids_json: String,
+) -> AppResult<()> {
     let conn = lock_db(&state)?;
     db::workspaces::update_workspace(&conn, &id, &name, &project_ids_json)
 }
@@ -91,13 +108,20 @@ pub fn update_workspace_timestamp(state: State<AppState>, id: String) -> AppResu
 // --- Sessions ---
 
 #[tauri::command]
-pub fn create_session(state: State<AppState>, project_id: String, title: String) -> AppResult<db::sessions::Session> {
+pub fn create_session(
+    state: State<AppState>,
+    project_id: String,
+    title: String,
+) -> AppResult<db::sessions::Session> {
     let conn = lock_db(&state)?;
     db::sessions::create_session(&conn, &project_id, &title)
 }
 
 #[tauri::command]
-pub fn list_sessions(state: State<AppState>, project_id: String) -> AppResult<Vec<db::sessions::Session>> {
+pub fn list_sessions(
+    state: State<AppState>,
+    project_id: String,
+) -> AppResult<Vec<db::sessions::Session>> {
     let conn = lock_db(&state)?;
     db::sessions::list_sessions(&conn, &project_id)
 }
@@ -158,7 +182,10 @@ pub fn create_thread(
 }
 
 #[tauri::command]
-pub fn list_threads(state: State<AppState>, session_id: String) -> AppResult<Vec<db::threads::Thread>> {
+pub fn list_threads(
+    state: State<AppState>,
+    session_id: String,
+) -> AppResult<Vec<db::threads::Thread>> {
     let conn = lock_db(&state)?;
     db::threads::list_threads(&conn, &session_id)
 }
@@ -212,13 +239,19 @@ pub fn create_message(
 }
 
 #[tauri::command]
-pub fn list_messages(state: State<AppState>, thread_id: String) -> AppResult<Vec<db::messages::Message>> {
+pub fn list_messages(
+    state: State<AppState>,
+    thread_id: String,
+) -> AppResult<Vec<db::messages::Message>> {
     let conn = lock_db(&state)?;
     db::messages::list_messages(&conn, &thread_id)
 }
 
 #[tauri::command]
-pub fn search_messages(state: State<AppState>, query: String) -> AppResult<Vec<db::messages::Message>> {
+pub fn search_messages(
+    state: State<AppState>,
+    query: String,
+) -> AppResult<Vec<db::messages::Message>> {
     let conn = lock_db(&state)?;
     db::messages::search_messages(&conn, &query)
 }
@@ -252,7 +285,11 @@ pub fn set_proxy(state: State<AppState>, url: String) -> AppResult<()> {
     drop(conn);
 
     // 2. Update global proxy state
-    let clean_url = if url.trim().is_empty() { None } else { Some(url.trim().to_string()) };
+    let clean_url = if url.trim().is_empty() {
+        None
+    } else {
+        Some(url.trim().to_string())
+    };
     proxy::set_url(clean_url);
 
     // 3. Rebuild HTTP client with new proxy

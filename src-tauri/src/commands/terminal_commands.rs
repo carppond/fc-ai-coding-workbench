@@ -1,8 +1,14 @@
+use super::run_blocking;
+use crate::coding_cli::{
+    build_launch_command, resolve_executable, CliLaunchAction, CodingCli, OmpApprovalMode,
+};
 use crate::errors::{AppError, AppResult};
 use crate::terminal::TerminalSession;
 use std::collections::{HashMap, VecDeque};
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use sysinfo::{Pid, ProcessRefreshKind, RefreshKind, System};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 use tauri::{AppHandle, State};
 
 /// 预热终端池大小：连续开多个 tab / 分屏时也能秒开
@@ -13,31 +19,85 @@ pub struct TerminalState {
     pub warmup: Arc<Mutex<VecDeque<TerminalSession>>>,
 }
 
-/// 跨平台进程检测：枚举 `pid` 的直接子进程。
-/// 返回 (子进程数量, 是否存在命令行包含 "claude" 的子进程)。
-/// 取代旧的 pgrep 实现 —— pgrep 仅 Unix 可用，Windows 上静默失败。
-fn inspect_children(pid: u32) -> (usize, bool) {
-    let sys = System::new_with_specifics(
-        RefreshKind::new().with_processes(ProcessRefreshKind::everything()),
+/// Match an actual executable or its Node/Bun entry script, never arbitrary
+/// command arguments (\"pi\" also appears in unrelated names such as \"pip\").
+fn matches_cli_process(
+    executable: Option<&Path>,
+    args: &[OsString],
+    cli_paths: &[PathBuf],
+) -> bool {
+    if executable
+        .and_then(|path| path.canonicalize().ok())
+        .is_some_and(|path| cli_paths.contains(&path))
+    {
+        return true;
+    }
+    let name = executable
+        .and_then(Path::file_name)
+        .or_else(|| args.first().and_then(|arg| Path::new(arg).file_name()))
+        .and_then(|name| name.to_str());
+    let is_runtime = name.is_some_and(|name| {
+        ["node", "node.exe", "bun", "bun.exe"]
+            .iter()
+            .any(|runtime| name.eq_ignore_ascii_case(runtime))
+    });
+    is_runtime
+        && args
+            .get(1)
+            .and_then(|arg| Path::new(arg).canonicalize().ok())
+            .is_some_and(|path| cli_paths.contains(&path))
+}
+
+/// Return the direct-child count and whether the sole foreground chain is a
+/// known coding CLI. Ambiguous/background jobs never receive typed exit input.
+fn inspect_children(pid: u32) -> AppResult<(usize, bool)> {
+    let mut sys = System::new();
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::new()
+            .with_cmd(UpdateKind::OnlyIfNotSet)
+            .with_exe(UpdateKind::OnlyIfNotSet),
     );
     let target = Pid::from_u32(pid);
-    let mut count = 0usize;
-    let mut has_claude = false;
-    for (_, proc_) in sys.processes() {
-        if proc_.parent() == Some(target) {
-            count += 1;
-            // 命令行或进程名包含 "claude" 即判定为 Claude CLI 在运行
-            let in_name = proc_.name().to_string_lossy().to_lowercase().contains("claude");
-            let in_cmd = proc_
-                .cmd()
-                .iter()
-                .any(|s| s.to_string_lossy().to_lowercase().contains("claude"));
-            if in_name || in_cmd {
-                has_claude = true;
-            }
+    let shell = sys
+        .process(target)
+        .ok_or_else(|| AppError::General("Terminal process is no longer running".into()))?;
+    if shell.status() == sysinfo::ProcessStatus::Zombie {
+        return Err(AppError::General("Terminal process has exited".into()));
+    }
+    let mut roots = sys
+        .processes()
+        .values()
+        .filter(|process| process.parent() == Some(target));
+    let first = roots.next().map(|process| process.pid());
+    let count = usize::from(first.is_some()) + roots.count();
+    if count != 1 {
+        return Ok((count, false));
+    }
+    let cli_paths: Vec<PathBuf> = [CodingCli::Omp, CodingCli::Pi]
+        .into_iter()
+        .filter_map(|cli| resolve_executable(cli).ok()?.canonicalize().ok())
+        .collect();
+    let mut current = first;
+    for _ in 0..8 {
+        let Some(process) = current.and_then(|pid| sys.process(pid)) else {
+            break;
+        };
+        if matches_cli_process(process.exe(), process.cmd(), &cli_paths) {
+            return Ok((count, true));
+        }
+        // npm's Windows command shim can add a cmd.exe -> node.exe layer.
+        let mut children = sys
+            .processes()
+            .values()
+            .filter(|child| child.parent() == Some(process.pid()));
+        current = children.next().map(|child| child.pid());
+        if children.next().is_some() {
+            break;
         }
     }
-    (count, has_claude)
+    Ok((count, false))
 }
 
 #[tauri::command]
@@ -52,12 +112,10 @@ pub async fn spawn_terminal(
     let c = cols.unwrap_or(80);
 
     // 在后台线程创建 PTY，避免阻塞 UI
-    let session = tauri::async_runtime::spawn_blocking(move || {
-        TerminalSession::spawn(app, initial_dir.as_deref(), r, c)
+    let session = run_blocking(move || {
+        TerminalSession::spawn(app, initial_dir.as_deref(), r, c).map_err(AppError::General)
     })
-    .await
-    .map_err(|e| AppError::General(format!("spawn task failed: {}", e)))?
-    .map_err(AppError::General)?;
+    .await?;
 
     let session_id = session.id.clone();
     let shell_name = session.shell_name.clone();
@@ -104,90 +162,98 @@ pub fn resize_terminal(
     Ok(())
 }
 
-/// 关闭终端。如果检测到 Claude CLI 正在运行，先发送 /exit 让其优雅退出。
+/// Give a recognized coding CLI a chance to cancel and exit before closing the PTY.
 #[tauri::command]
-pub async fn kill_terminal(
-    state: State<'_, TerminalState>,
-    session_id: String,
-) -> AppResult<()> {
-    let mut need_wait = false;
-
-    // 检测是否有 claude 在运行，如果有则发 /exit（跨平台，用 sysinfo）
-    {
-        // 先取出 pid，释放锁后扫描进程，再短暂持锁写入 /exit
-        let pid = {
-            let sessions = state
-                .sessions
-                .lock()
-                .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
-            sessions.get(&session_id).and_then(|s| s.child_pid())
-        };
-        if let Some(pid) = pid {
-            let (_, has_claude) = inspect_children(pid);
-            if has_claude {
-                let sessions = state
-                    .sessions
-                    .lock()
-                    .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
-                if let Some(session) = sessions.get(&session_id) {
-                    let _ = session.write("/exit\r");
-                    need_wait = true;
-                }
-            }
-        }
-    } // 释放锁
-
-    // 等待 claude 处理 /exit 命令
-    if need_wait {
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    }
-
-    // 移除 session，触发 Drop → child.kill()
-    let mut sessions = state
-        .sessions
-        .lock()
-        .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
-    sessions.remove(&session_id);
-    Ok(())
-}
-
-/// 检查终端是否空闲（shell 无子进程）。
-/// 用 sysinfo 跨平台枚举子进程，取代仅 Unix 可用的 pgrep。
-#[tauri::command]
-pub fn is_terminal_idle(
-    state: State<TerminalState>,
-    session_id: String,
-) -> AppResult<bool> {
-    let pid = {
-        let sessions = state
+pub async fn kill_terminal(state: State<'_, TerminalState>, session_id: String) -> AppResult<()> {
+    // Transfer ownership before any process scan or wait; never hold the global
+    // session lock while stopping a PTY or waiting for the child to exit.
+    let session = {
+        let mut sessions = state
             .sessions
             .lock()
             .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
+        sessions.remove(&session_id)
+    };
+    if let Some(session) = session {
+        run_blocking(move || {
+            if let Some(pid) = session.child_pid() {
+                if inspect_children(pid).is_ok_and(|(_, coding_cli)| coding_cli) {
+                    let _ = session.write("\u{3}");
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    let _ = session.write("\u{4}");
+                    std::thread::sleep(std::time::Duration::from_millis(400));
+                }
+            }
+            drop(session);
+            Ok(())
+        })
+        .await?;
+    }
+    Ok(())
+}
+
+/// CLI launches are whitelisted and rejected if terminal readiness cannot be verified.
+#[tauri::command]
+pub async fn launch_coding_cli(
+    state: State<'_, TerminalState>,
+    launch_config: State<'_, crate::coding_cli::CliLaunchConfig>,
+    session_id: String,
+    cli: CodingCli,
+    action: CliLaunchAction,
+    approval: OmpApprovalMode,
+) -> AppResult<()> {
+    let (pid, shell_name) = {
+        let sessions = state
+            .sessions
+            .lock()
+            .map_err(|_| AppError::General("Terminal state lock poisoned".into()))?;
         let session = sessions
             .get(&session_id)
-            .ok_or_else(|| AppError::General("session not found".into()))?;
-        session.child_pid().ok_or_else(|| AppError::General("no pid".into()))?
+            .ok_or_else(|| AppError::General("Terminal session not found".into()))?;
+        if !session.is_alive() {
+            return Err(AppError::General("Terminal process has exited".into()));
+        }
+        (
+            session
+                .child_pid()
+                .ok_or_else(|| AppError::General("Terminal PID unavailable".into()))?,
+            session.shell_name.clone(),
+        )
     };
-    // 释放 sessions 锁后再做进程扫描（扫描较慢，避免长时间持锁）
-    let (child_count, _) = inspect_children(pid);
-    Ok(child_count == 0)
+    let new_session_overlay = launch_config.new_session_overlay.clone();
+    let command = run_blocking(move || {
+        if inspect_children(pid)?.0 != 0 {
+            return Err(AppError::General(
+                "Terminal is busy; use an idle pane to start a CLI".into(),
+            ));
+        }
+        build_launch_command(cli, action, approval, &shell_name, &new_session_overlay)
+    })
+    .await?;
+    let sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| AppError::General("Terminal state lock poisoned".into()))?;
+    let session = sessions
+        .get(&session_id)
+        .ok_or_else(|| AppError::General("Terminal session was closed".into()))?;
+    if !session.is_alive() {
+        return Err(AppError::General("Terminal process has exited".into()));
+    }
+    session
+        .write(&format!("{command}\r"))
+        .map_err(AppError::General)
 }
 
 #[tauri::command]
-pub fn terminal_cd(
-    state: State<TerminalState>,
-    session_id: String,
-    path: String,
-) -> AppResult<()> {
+pub fn terminal_cd(state: State<TerminalState>, session_id: String, path: String) -> AppResult<()> {
     let sessions = state
         .sessions
         .lock()
         .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
     if let Some(session) = sessions.get(&session_id) {
         let cmd = build_cd_command(&session.shell_name, &path);
-        session
-            .write(&cmd)
-            .map_err(|e| AppError::General(e))?;
+        session.write(&cmd).map_err(|e| AppError::General(e))?;
     }
     Ok(())
 }
@@ -210,20 +276,24 @@ pub async fn warmup_terminal(
         return Ok(());
     }
 
-    // 每个缺额各起一个后台线程预热，命令立即返回
+    // Creation and excess-session cleanup share the bounded blocking executor.
     for _ in 0..need {
         let app = app.clone();
         let dir = initial_dir.clone();
         let warmup_arc = Arc::clone(&state.warmup);
-        tauri::async_runtime::spawn_blocking(move || {
-            if let Ok(session) = TerminalSession::spawn(app, dir.as_deref(), 24, 80) {
-                if let Ok(mut warmup) = warmup_arc.lock() {
-                    // 二次确认未超额（并发预热可能多起，超了就丢弃触发 Drop）
-                    if warmup.len() < WARMUP_POOL_SIZE {
-                        warmup.push_back(session);
-                    }
+        tauri::async_runtime::spawn(async move {
+            let _ = run_blocking(move || {
+                let session = TerminalSession::spawn(app, dir.as_deref(), 24, 80)
+                    .map_err(AppError::General)?;
+                let mut warmup = warmup_arc
+                    .lock()
+                    .map_err(|_| AppError::General("Terminal state lock poisoned".into()))?;
+                if warmup.len() < WARMUP_POOL_SIZE {
+                    warmup.push_back(session);
                 }
-            }
+                Ok(())
+            })
+            .await;
         });
     }
 
@@ -273,50 +343,34 @@ pub fn claim_warmup_terminal(
     Ok(Some((session_id, shell_name)))
 }
 
-/// Flush buffered output and enable direct event emission for this session.
-/// Must be called after the frontend has registered its event listeners.
+/// Start output only after the frontend has registered its event listeners.
 #[tauri::command]
-pub fn terminal_subscribe(
-    app: AppHandle,
+pub fn terminal_subscribe(state: State<TerminalState>, session_id: String) -> AppResult<()> {
+    let sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
+    let session = sessions
+        .get(&session_id)
+        .ok_or_else(|| AppError::General("session not found".into()))?;
+    session.subscribe_output();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn acknowledge_terminal_output(
     state: State<TerminalState>,
     session_id: String,
+    sequence: u64,
 ) -> AppResult<()> {
-    use crate::terminal::PendingItem;
-    use tauri::Emitter;
-
     let sessions = state
         .sessions
         .lock()
         .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
     if let Some(session) = sessions.get(&session_id) {
-        let output_event = format!("terminal-output-{}", session_id);
-        let exit_event = format!("terminal-exit-{}", session_id);
-
-        let (combined, has_exit) = {
-            let mut buf = session
-                .pending_output
-                .lock()
-                .map_err(|_| AppError::General("pending_output lock poisoned".to_string()))?;
-            let mut output = String::new();
-            let mut exited = false;
-            for item in buf.drain(..) {
-                match item {
-                    PendingItem::Output(s) => output.push_str(&s),
-                    PendingItem::Exited => exited = true,
-                }
-            }
-            session
-                .subscribed
-                .store(true, std::sync::atomic::Ordering::Release);
-            (output, exited)
-        };
-
-        if !combined.is_empty() {
-            let _ = app.emit(&output_event, &combined);
-        }
-        if has_exit {
-            let _ = app.emit(&exit_event, &session_id);
-        }
+        session
+            .acknowledge_output(sequence)
+            .map_err(AppError::General)?;
     }
     Ok(())
 }
@@ -339,5 +393,36 @@ fn build_cd_command(shell_name: &str, path: &str) -> String {
             let escaped = format!("'{}'", path.replace('\'', "'\\''"));
             format!(" cd {} && clear\n", escaped)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_detection_matches_entrypoints_not_prompt_arguments_or_name_substrings() {
+        let directory =
+            std::env::temp_dir().join(format!("shiguang-cli-match-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let entry = directory.join("pi");
+        let server = directory.join("api-server.js");
+        std::fs::write(&entry, "").unwrap();
+        std::fs::write(&server, "").unwrap();
+        let paths = [entry.canonicalize().unwrap()];
+        let node = Path::new("node");
+        let real_args = vec![OsString::from("node"), entry.clone().into_os_string()];
+        let other_args = vec![
+            OsString::from("node"),
+            server.into_os_string(),
+            entry.into_os_string(),
+        ];
+        let real_cli = matches_cli_process(Some(node), &real_args, &paths);
+        let other_program = matches_cli_process(Some(node), &other_args, &paths);
+        let misleading_name = matches_cli_process(Some(Path::new("pip")), &[], &paths);
+        std::fs::remove_dir_all(directory).unwrap();
+        assert!(real_cli);
+        assert!(!other_program);
+        assert!(!misleading_name);
     }
 }

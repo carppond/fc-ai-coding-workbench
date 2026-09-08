@@ -565,21 +565,28 @@ async fn run_git(
     project_path: &str,
     args: &[&str],
 ) -> AppResult<(bool, String, String)> {
+    let path = crate::commands::run_blocking(|| {
+        Ok(crate::commands::setup_commands::user_shell_path())
+    }).await?;
+
     let mut cmd = tokio::process::Command::new("git");
     cmd.args(args)
         .current_dir(project_path)
-        .env("PATH", crate::commands::setup_commands::user_shell_path())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
+        .env("PATH", path);
     for (k, v) in crate::proxy::env_pairs() {
         cmd.env(k, v);
     }
-    let child = cmd.spawn()?;
-    let output = tokio::time::timeout(GIT_REMOTE_TIMEOUT, child.wait_with_output())
+    let output = crate::commands::command_output_with_timeout(&mut cmd, GIT_REMOTE_TIMEOUT, None)
         .await
-        .map_err(|_| {
-            AppError::General(format!("git {} timed out (30s)", args.first().unwrap_or(&"")))
-        })??;
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::TimedOut {
+                AppError::General(format!(
+                    "git {} timed out (30s)", args.first().unwrap_or(&"")
+                ))
+            } else {
+                error.into()
+            }
+        })?;
     Ok((
         output.status.success(),
         String::from_utf8_lossy(&output.stdout).to_string(),

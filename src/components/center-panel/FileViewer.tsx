@@ -7,7 +7,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { useFileStore } from "../../stores/fileStore";
 import { useI18n } from "../../lib/i18n";
 
-import { EditorState, type Extension } from "@codemirror/state";
+import { EditorState, type Extension, type Text } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, dropCursor, rectangularSelection, crosshairCursor } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { syntaxHighlighting as cmSyntaxHighlighting, indentOnInput, bracketMatching, foldGutter, foldKeymap } from "@codemirror/language";
@@ -18,11 +18,13 @@ import { appEditorTheme, appHighlightStyle, fontSizeCompartment, editorFontSizeE
 import { getLanguageExtension } from "./editorLanguages";
 import { useSettingsStore } from "../../stores/settingsStore";
 
+const LARGE_FILE_CHAR_THRESHOLD = 5 * 1024 * 1024;
+
 export function FileViewer() {
   const openFilePath = useFileStore((s) => s.openFilePath);
+  const openFileVersion = useFileStore((s) => s.openFileVersion);
   const openFileContent = useFileStore((s) => s.openFileContent);
   const openFileError = useFileStore((s) => s.openFileError);
-  const openFileLine = useFileStore((s) => s.openFileLine);
   const isDirty = useFileStore((s) => s.isDirty);
   const saving = useFileStore((s) => s.saving);
   const closeFile = useFileStore((s) => s.closeFile);
@@ -42,84 +44,87 @@ export function FileViewer() {
   const viewRef = useRef<EditorView | null>(null);
   const [copied, setCopied] = useState(false);
   const [saved, setSaved] = useState(false);
-  // 跟踪编辑器创建时的文件路径，用于识别文件切换
-  const editorFileRef = useRef<string | null>(null);
-  // 原始内容引用，用于脏状态判断
-  const originalContentRef = useRef("");
+  const [largeFileMode, setLargeFileMode] = useState(false);
+  const savedTimerRef = useRef<number | undefined>(undefined);
+  const editorVersionRef = useRef<number | null>(null);
+  // CodeMirror Text 为不可变树，保留共享快照而非在每次输入时创建全文字符串。
+  const savedDocRef = useRef<Text | null>(null);
 
   // 保存回调（保持最新引用，供 keymap 使用）
   const saveCallbackRef = useRef<() => void>(() => {});
   saveCallbackRef.current = useCallback(() => {
-    if (!viewRef.current) return;
-    const content = viewRef.current.state.doc.toString();
-    saveFile(content).then((ok) => {
-      if (ok) {
-        originalContentRef.current = content;
-        setSaved(true);
-        setTimeout(() => setSaved(false), 2000);
-      }
+    const view = viewRef.current;
+    const { openFileVersion: version, saving } = useFileStore.getState();
+    if (!view || saving || editorVersionRef.current !== version) return;
+    const doc = view.state.doc;
+    saveFile(doc.toString()).then((ok) => {
+      if (!ok || viewRef.current !== view || useFileStore.getState().openFileVersion !== version) return;
+      savedDocRef.current = doc;
+      const dirty = !view.state.doc.eq(doc);
+      markDirty(dirty);
+      setSaved(!dirty);
+      window.clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = window.setTimeout(() => {
+        setSaved(false);
+        savedTimerRef.current = undefined;
+      }, 2000);
     });
-  }, [saveFile]);
+  }, [saveFile, markDirty]);
 
-  // 文件切换时重置预览模式
-  const prevFileRef = useRef(openFilePath);
   useEffect(() => {
-    if (openFilePath !== prevFileRef.current) {
-      setPreviewMode(false);
-      prevFileRef.current = openFilePath;
-    }
-  }, [openFilePath]);
+    setPreviewMode(false);
+    setSaved(false);
+    setLargeFileMode(false);
+    window.clearTimeout(savedTimerRef.current);
+    savedTimerRef.current = undefined;
+  }, [openFileVersion]);
 
-  // 创建/更新编辑器
+  // 内容就绪后初始化；保存只更新 store 中的内容，不触发编辑器销毁，保留撤销栈。
+  const fileReady = openFileContent !== null;
   useEffect(() => {
-    if (!containerRef.current || !openFilePath || openFileContent === null) return;
+    const { openFilePath: path, openFileContent: content, openFileLine: targetLine } = useFileStore.getState();
+    if (!containerRef.current || !path || content === null || isImage) return;
+    const version = openFileVersion;
+    const lightMode = content.length >= LARGE_FILE_CHAR_THRESHOLD;
+    let cancelled = false;
+    let editor: EditorView | null = null;
+    setLargeFileMode(lightMode);
 
-    // 如果编辑器已存在且是同一个文件，跳过重建
-    if (viewRef.current && editorFileRef.current === openFilePath) return;
-
-    // 销毁旧编辑器
-    if (viewRef.current) {
-      viewRef.current.destroy();
-      viewRef.current = null;
-    }
-    editorFileRef.current = openFilePath;
-    originalContentRef.current = openFileContent ?? "";
-
-    // 异步加载语言扩展
     const setup = async () => {
-      const langExt = await getLanguageExtension(openFilePath);
+      const langExt = lightMode ? null : await getLanguageExtension(path);
+      if (cancelled || useFileStore.getState().openFileVersion !== version || !containerRef.current) return;
 
       const extensions: Extension[] = [];
-
-      // 语言扩展放在最前面，确保语法树先于括号匹配可用
-      if (langExt) {
-        extensions.push(langExt);
+      if (!lightMode) {
+        if (langExt) extensions.push(langExt);
+        extensions.push(
+          foldGutter(),
+          indentOnInput(),
+          cmSyntaxHighlighting(appHighlightStyle),
+          bracketMatching({ brackets: "()[]{}", afterCursor: true }),
+          closeBrackets(),
+          autocompletion(),
+          highlightSelectionMatches(),
+        );
       }
 
       extensions.push(
         lineNumbers(),
         highlightActiveLineGutter(),
         history(),
-        foldGutter(),
         drawSelection(),
         dropCursor(),
         EditorState.allowMultipleSelections.of(true),
-        indentOnInput(),
-        cmSyntaxHighlighting(appHighlightStyle),
-        bracketMatching({ brackets: "()[]{}",  afterCursor: true }),
-        closeBrackets(),
-        autocompletion(),
         rectangularSelection(),
         crosshairCursor(),
         highlightActiveLine(),
-        highlightSelectionMatches(),
         keymap.of([
-          ...closeBracketsKeymap,
+          ...(lightMode ? [] : closeBracketsKeymap),
           ...defaultKeymap,
           ...searchKeymap,
           ...historyKeymap,
-          ...foldKeymap,
-          ...completionKeymap,
+          ...(lightMode ? [] : foldKeymap),
+          ...(lightMode ? [] : completionKeymap),
           indentWithTab,
           // Cmd+S / Ctrl+S 保存
           {
@@ -132,10 +137,9 @@ export function FileViewer() {
         ]),
         // 监听内容变化，更新脏状态
         EditorView.updateListener.of((update) => {
-          if (update.docChanged) {
-            const newContent = update.state.doc.toString();
-            const dirty = newContent !== originalContentRef.current;
-            markDirty(dirty);
+          if (update.docChanged && useFileStore.getState().openFileVersion === version && savedDocRef.current) {
+            const dirty = !update.state.doc.eq(savedDocRef.current);
+            if (useFileStore.getState().isDirty !== dirty) markDirty(dirty);
           }
         }),
         appEditorTheme,
@@ -143,22 +147,23 @@ export function FileViewer() {
       );
 
       const state = EditorState.create({
-        doc: openFileContent ?? "",
+        doc: content,
         extensions,
       });
-
-      if (!containerRef.current) return;
 
       const view = new EditorView({
         state,
         parent: containerRef.current,
       });
+      editor = view;
+      editorVersionRef.current = version;
+      savedDocRef.current = state.doc;
 
       viewRef.current = view;
 
       // 滚动到指定行
-      if (openFileLine && openFileLine > 0) {
-        const line = Math.min(openFileLine, view.state.doc.lines);
+      if (targetLine && targetLine > 0) {
+        const line = Math.min(targetLine, view.state.doc.lines);
         const lineInfo = view.state.doc.line(line);
         view.dispatch({
           effects: EditorView.scrollIntoView(lineInfo.from, { y: "center" }),
@@ -170,14 +175,17 @@ export function FileViewer() {
     setup();
 
     return () => {
-      // 组件卸载时清理
-      if (viewRef.current) {
-        viewRef.current.destroy();
+      cancelled = true;
+      if (viewRef.current === editor) {
         viewRef.current = null;
-        editorFileRef.current = null;
+        editorVersionRef.current = null;
+        savedDocRef.current = null;
       }
+      editor?.destroy();
+      window.clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = undefined;
     };
-  }, [openFilePath, openFileContent, openFileLine, markDirty]);
+  }, [openFileVersion, fileReady, isImage, markDirty]);
 
   // 动态更新编辑器字体大小
   useEffect(() => {
@@ -212,7 +220,12 @@ export function FileViewer() {
           {openFilePath}
         </span>
         <div style={{ display: "flex", gap: 4, flexShrink: 0, alignItems: "center" }}>
-          {saved && (
+          {!isImage && largeFileMode && (
+            <span title={t("fileViewer.largeFileModeHint")} style={{ fontSize: 11, color: "var(--text-muted)" }}>
+              {t("fileViewer.largeFileMode")}
+            </span>
+          )}
+          {saved && !isDirty && (
             <span style={{ fontSize: 11, color: "var(--success)" }}>
               {t("fileViewer.saved")}
             </span>

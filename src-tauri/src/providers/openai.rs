@@ -85,10 +85,12 @@ pub async fn stream_chat(
         let chunk = chunk_result.map_err(|e| AppError::Provider(e.to_string()))?;
         buffer.push_str(&String::from_utf8_lossy(&chunk));
 
-        // Process complete SSE lines
-        while let Some(line_end) = buffer.find('\n') {
-            let line = buffer[..line_end].trim().to_string();
-            buffer = buffer[line_end + 1..].to_string();
+        // 处理完整的 SSE 行
+        let mut pos = 0;
+        while let Some(rel) = buffer[pos..].find('\n') {
+            let line_end = pos + rel;
+            let line = buffer[pos..line_end].trim();
+            pos = line_end + 1;
 
             if line.is_empty() || line.starts_with(':') {
                 continue;
@@ -120,6 +122,10 @@ pub async fn stream_chat(
                     }
                 }
             }
+        }
+        // 一次性移除已处理的部分
+        if pos > 0 {
+            buffer.drain(..pos);
         }
     }
 
