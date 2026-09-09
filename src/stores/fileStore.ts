@@ -1,20 +1,10 @@
 import { create } from "zustand";
 import type { DirEntry } from "../lib/types";
 import * as ipc from "../ipc/commands";
+import { findProjectRoot, normalizePathKey } from "../lib/fileTreeGit";
+import { useProjectStore } from "./projectStore";
+import { useGitStore } from "./gitStore";
 
-/** 统一路径分隔符为 /（兼容 Windows 反斜杠） */
-function normSep(p: string): string {
-  return p.replace(/\\/g, "/");
-}
-
-/* ── 辅助：找到绝对路径所属的项目根 ── */
-function findRootPath(trees: Record<string, DirEntry[]>, path: string): string | undefined {
-  const np = normSep(path);
-  return Object.keys(trees).find((rp) => {
-    const nrp = normSep(rp);
-    return np === nrp || np.startsWith(nrp + "/");
-  });
-}
 
 /* ── 辅助：在条目树中递归查找节点 ── */
 function findNode(entries: DirEntry[], path: string): DirEntry | null {
@@ -147,9 +137,8 @@ export const useFileStore = create<FileState>((set, get) => ({
 
     expanded.add(path);
     set({ expandedPaths: expanded });
-
     // 找到该路径所属的项目根
-    const rootPath = findRootPath(trees, path);
+    const rootPath = findProjectRoot(Object.keys(trees), path);
     if (!rootPath) return;
 
     // 检查 children 是否已加载
@@ -164,7 +153,7 @@ export const useFileStore = create<FileState>((set, get) => ({
 
     ipc.readDirectoryChildren(path).then((children) => {
       const { trees: curTrees, loadingPaths: curLoading } = get();
-      const rp = findRootPath(curTrees, path);
+      const rp = findProjectRoot(Object.keys(curTrees), path);
       if (!rp) return;
       const updatedTrees = patchTree(curTrees, rp, (entries) =>
         updateChildren(entries, path, children),
@@ -192,8 +181,8 @@ export const useFileStore = create<FileState>((set, get) => ({
 
         // 刷新该项目下所有已展开的子目录
         for (const dirPath of expandedPaths) {
-          if (dirPath === rp) continue;
-          if (!normSep(dirPath).startsWith(normSep(rp) + "/")) continue;
+          if (normalizePathKey(dirPath) === normalizePathKey(rp)) continue;
+          if (findProjectRoot([rp], dirPath) !== rp) continue;
           try {
             const children = await ipc.readDirectoryChildren(dirPath);
             updatedEntries = updateChildren(updatedEntries, dirPath, children);
@@ -242,6 +231,8 @@ export const useFileStore = create<FileState>((set, get) => ({
     set({ saving: true });
     try {
       await ipc.writeFileContent(path, content);
+      const root = findProjectRoot(useProjectStore.getState().projects.map((project) => project.path), path);
+      if (root) void useGitStore.getState().refreshRepo(root, false);
       if (get().openFileVersion !== version) return false;
       // 编辑器用保存时的 Text 快照比较当前文档，保存期间的新输入仍需保持脏状态。
       set({ openFileContent: content, saving: false });
@@ -257,7 +248,7 @@ export const useFileStore = create<FileState>((set, get) => ({
     try {
       const children = await ipc.readDirectoryChildren(parentPath);
       const { trees } = get();
-      const rootPath = findRootPath(trees, parentPath);
+      const rootPath = findProjectRoot(Object.keys(trees), parentPath);
       if (!rootPath) return;
 
       if (parentPath === rootPath) {

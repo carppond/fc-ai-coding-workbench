@@ -6,6 +6,7 @@ import { useProjectStore } from "../../stores/projectStore";
 import { useI18n } from "../../lib/i18n";
 import { useConfirm } from "../common/ConfirmDialog";
 import * as ipc from "../../ipc/commands";
+import { findProjectRoot, normalizePathKey } from "../../lib/fileTreeGit";
 
 interface FileTreeItemProps {
   entry: DirEntry;
@@ -83,6 +84,7 @@ function statusLetter(status: string): string {
     case "deleted": return "D";
     case "untracked": return "?";
     case "renamed": return "R";
+    case "conflicted": return "U";
     default: return "?";
   }
 }
@@ -93,6 +95,7 @@ function statusClass(status: string): string {
     case "modified": case "renamed": return "modified";
     case "added": case "untracked": return "added";
     case "deleted": return "deleted";
+    case "conflicted": return "conflicted";
     default: return "modified";
   }
 }
@@ -103,6 +106,8 @@ export const FileTreeItem = memo(function FileTreeItem({ entry, depth, defaultEx
   const loadingPaths = useFileStore((s) => s.loadingPaths);
   const openFile = useFileStore((s) => s.openFile);
   const refreshParent = useFileStore((s) => s.refreshParent);
+  const unsaved = useFileStore((state) => state.isDirty && state.openFilePath !== null
+    && normalizePathKey(state.openFilePath) === normalizePathKey(entry.path));
   const { t } = useI18n();
   const { confirm } = useConfirm();
   const isExpanded = expandedPaths.has(entry.path);
@@ -151,12 +156,12 @@ export const FileTreeItem = memo(function FileTreeItem({ entry, depth, defaultEx
     // 多项目模式下，点击文件/目录自动切换源代码管理上下文（不影响终端）
     const { gitContextPath, projects, selectedProjectIds, setGitContext } = useProjectStore.getState();
     if (selectedProjectIds.size > 1) {
-      const normSep = (s: string) => s.replace(/\\/g, "/");
-      const ownerProject = projects.find(
-        (p) => selectedProjectIds.has(p.id) && (entry.path === p.path || normSep(entry.path).startsWith(normSep(p.path) + "/")),
+      const root = findProjectRoot(
+        projects.filter((project) => selectedProjectIds.has(project.id)).map((project) => project.path),
+        entry.path,
       );
-      if (ownerProject && ownerProject.path !== gitContextPath) {
-        setGitContext(ownerProject.path);
+      if (root && root !== gitContextPath) {
+        setGitContext(root);
       }
     }
 
@@ -305,8 +310,9 @@ export const FileTreeItem = memo(function FileTreeItem({ entry, depth, defaultEx
             onClick={(e) => e.stopPropagation()}
           />
         ) : (() => {
-          const fileStatus = gitStatusMap?.get(entry.path);
-          const hasDirtyChildren = isDir && gitDirtyDirs?.has(entry.path);
+          const pathKey = normalizePathKey(entry.path);
+          const fileStatus = gitStatusMap?.get(pathKey);
+          const hasDirtyChildren = isDir && gitDirtyDirs?.has(pathKey);
           const nameClass = fileStatus
             ? `file-tree-item__name file-tree-item__name--${statusClass(fileStatus.status)}`
             : hasDirtyChildren
@@ -315,6 +321,10 @@ export const FileTreeItem = memo(function FileTreeItem({ entry, depth, defaultEx
           return (
             <>
               <span className={nameClass} style={isProjectRoot ? { fontWeight: 600 } : undefined}>{entry.name}</span>
+              {unsaved && (
+                <span className="file-tree-item__unsaved" role="img"
+                  aria-label={t("fileTree.unsaved")} title={t("fileTree.unsaved")} />
+              )}
               {fileStatus && (
                 <span className={`file-tree-item__git-status file-tree-item__name--${statusClass(fileStatus.status)}`}>
                   {statusLetter(fileStatus.status)}

@@ -9,7 +9,7 @@ A desktop coding assistant integrating AI chat, Git workflow, and terminal, buil
 - **AI Chat (In Development)** — Anthropic Claude and OpenAI provider interfaces remain available; terminal-based coding uses OMP or Pi
 - **Git Integration** — File-level staging/unstaging, commit, push/pull, branch tracking, commit log, diff preview
 - **Built-in Terminal** — Multi-tab terminal supporting zsh/bash/fish/PowerShell with custom prompt and full keyboard shortcut support; bounded output flow control preserves ordered ANSI data in hidden tabs
-- **File Management** — Project file tree browsing, search, create/rename/delete
+- **File Management** — Project file tree browsing, search, create/rename/delete; Git decorations are scoped to each repository, with a separate dot for unsaved editor changes
 - **File Editing** — CodeMirror editing with undo-aware saved snapshots; large files use a lightweight mode that retains editing, search, undo and save
 - **Environment Checks** — Local tool detection is independent of background update checks, with shared requests and subprocess deadlines
 - **Network Proxy** — HTTP/HTTPS/SOCKS5 proxy support, one-click apply to Git, npm, terminal, and API requests

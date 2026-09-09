@@ -133,17 +133,27 @@ export function RightPanel() {
   const gitContextPath = useProjectStore((s) => s.gitContextPath);
   const isGitRepo = useGitStore((s) => s.isGitRepo);
   const refresh = useGitStore((s) => s.refresh);
-  const refreshLite = useGitStore((s) => s.refreshLite);
+  const refreshRepo = useGitStore((s) => s.refreshRepo);
+  const refreshAllRepos = useGitStore((s) => s.refreshAllRepos);
   const reset = useGitStore((s) => s.reset);
   const { t } = useI18n();
   const failCountRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const focusedRef = useRef(true);
+  const pollGenerationRef = useRef(0);
 
   const projects = useProjectStore((s) => s.projects);
+  const selectedProjectIds = useProjectStore((s) => s.selectedProjectIds);
 
   // 源代码管理使用的项目路径：gitContextPath 优先，fallback 到 activeProject
   const effectivePath = gitContextPath ?? activeProject?.path ?? null;
+  const backgroundPaths = useMemo(() => projects
+    .filter((project) => selectedProjectIds.has(project.id) && project.path !== effectivePath)
+    .map((project) => project.path), [projects, selectedProjectIds, effectivePath]);
+
+  useEffect(() => {
+    void refreshAllRepos(backgroundPaths);
+  }, [backgroundPaths, refreshAllRepos]);
 
   const effectiveProjectName = useMemo(() => {
     if (!effectivePath) return null;
@@ -162,36 +172,42 @@ export function RightPanel() {
 
   // Smart polling: pause when unfocused, exponential backoff on failure
   const scheduleNext = useCallback(() => {
-    if (timerRef.current) clearTimeout(timerRef.current);
+    clearTimeout(timerRef.current ?? undefined);
     if (!effectivePath || !focusedRef.current) return;
 
     const backoff = Math.min(POLL_INTERVAL * Math.pow(2, failCountRef.current), MAX_BACKOFF);
+    const generation = pollGenerationRef.current;
 
     timerRef.current = setTimeout(async () => {
-      if (!effectivePath || !focusedRef.current) return;
+      if (!effectivePath || !focusedRef.current || generation !== pollGenerationRef.current) return;
       try {
-        await refreshLite(effectivePath);
+        await refreshRepo(effectivePath);
+        if (!focusedRef.current || generation !== pollGenerationRef.current) return;
+        await refreshAllRepos(backgroundPaths);
         failCountRef.current = 0;
       } catch {
         failCountRef.current = Math.min(failCountRef.current + 1, 5);
       }
-      scheduleNext();
+      if (generation === pollGenerationRef.current) scheduleNext();
     }, backoff);
-  }, [effectivePath, refreshLite]);
+  }, [effectivePath, refreshRepo, refreshAllRepos, backgroundPaths]);
 
   useEffect(() => {
     if (!effectivePath) return;
 
     const handleFocus = () => {
       focusedRef.current = true;
+      pollGenerationRef.current++;
       failCountRef.current = 0;
       refresh(effectivePath!);
+      void refreshAllRepos(backgroundPaths);
       scheduleNext();
     };
 
     const handleBlur = () => {
       focusedRef.current = false;
-      if (timerRef.current) clearTimeout(timerRef.current);
+      pollGenerationRef.current++;
+      clearTimeout(timerRef.current ?? undefined);
     };
 
     window.addEventListener("focus", handleFocus);
@@ -201,11 +217,12 @@ export function RightPanel() {
     scheduleNext();
 
     return () => {
+      pollGenerationRef.current++;
       window.removeEventListener("focus", handleFocus);
       window.removeEventListener("blur", handleBlur);
-      if (timerRef.current) clearTimeout(timerRef.current);
+      clearTimeout(timerRef.current ?? undefined);
     };
-  }, [effectivePath, refresh, scheduleNext]);
+  }, [effectivePath, refresh, refreshAllRepos, backgroundPaths, scheduleNext]);
 
   // 拖拽分割：直接操作 DOM，不加 wrapper，不触发 re-render
   // 必须放在条件 return 之前（React Hooks 规则）

@@ -657,6 +657,7 @@
 .file-tree-item__name--untracked {
   color: var(--success) !important;
 }
+.file-tree-item__name--conflicted,
 .file-tree-item__name--deleted {
   color: var(--error) !important;
 }
@@ -672,6 +673,16 @@
   flex-shrink: 0;
   margin-left: auto;
   padding-right: 4px;
+}
+
+.file-tree-item__unsaved {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warning);
+  flex-shrink: 0;
+  margin-left: 6px;
+  margin-right: 4px;
 }
 
 /* ========================================

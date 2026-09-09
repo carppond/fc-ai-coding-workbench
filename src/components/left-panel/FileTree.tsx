@@ -6,17 +6,16 @@ import { useGitStore } from "../../stores/gitStore";
 import { useI18n } from "../../lib/i18n";
 import { FileTreeItem } from "./FileTreeItem";
 import type { DirEntry } from "../../lib/types";
-import type { GitFileStatus } from "../../lib/types";
+import { buildGitDecorations } from "../../lib/fileTreeGit";
 
 export function FileTree() {
-  const activeProject = useProjectStore((s) => s.activeProject);
   const selectedIds = useProjectStore((s) => s.selectedProjectIds);
   const projects = useProjectStore((s) => s.projects);
   const trees = useFileStore((s) => s.trees);
   const loading = useFileStore((s) => s.loading);
   const loadTrees = useFileStore((s) => s.loadTrees);
   const loadTree = useFileStore((s) => s.loadTree);
-  const fileStatuses = useGitStore((s) => s.fileStatuses);
+  const repoStates = useGitStore((s) => s.repoStates);
   const { t } = useI18n();
 
   // 勾选的项目列表
@@ -40,31 +39,12 @@ export function FileTree() {
     }
   }, [displayKey]);
 
-  // 构建 git 状态查找 Map（绝对路径 → GitFileStatus）和脏目录 Set
-  const { gitStatusMap, gitDirtyDirs } = useMemo(() => {
-    const map = new Map<string, GitFileStatus>();
-    const dirs = new Set<string>();
-    if (!activeProject) return { gitStatusMap: map, gitDirtyDirs: dirs };
-
-    const projectPath = activeProject.path;
-    const sep = projectPath.includes("\\") ? "\\" : "/";
-    for (const status of fileStatuses) {
-      const absPath = projectPath + sep + status.path.replace(/\//g, sep);
-      map.set(absPath, status);
-      let parent = absPath;
-      while (true) {
-        const idx = Math.max(parent.lastIndexOf("/"), parent.lastIndexOf("\\"));
-        if (idx <= 0) break;
-        parent = parent.substring(0, idx);
-        if (parent.length <= projectPath.length) {
-          dirs.add(parent);
-          break;
-        }
-        dirs.add(parent);
-      }
-    }
-    return { gitStatusMap: map, gitDirtyDirs: dirs };
-  }, [activeProject, fileStatuses]);
+  // Each visible root owns its decorations; the Git panel and terminal may
+  // point at different projects, and nested roots can have different statuses.
+  const decorations = useMemo(() => new Map(displayProjects.map((project) => [
+    project.path,
+    buildGitDecorations(project.path, repoStates[project.path]?.fileStatuses ?? []),
+  ])), [displayProjects, repoStates]);
 
   if (displayProjects.length === 0) {
     return (
@@ -105,8 +85,8 @@ export function FileTree() {
               depth={0}
               defaultExpanded={!isMulti}
               isProjectRoot={isMulti}
-              gitStatusMap={gitStatusMap}
-              gitDirtyDirs={gitDirtyDirs}
+              gitStatusMap={decorations.get(proj.path)?.gitStatusMap}
+              gitDirtyDirs={decorations.get(proj.path)?.gitDirtyDirs}
             />
           );
         })}

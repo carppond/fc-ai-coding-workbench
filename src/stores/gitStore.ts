@@ -46,22 +46,6 @@ function makeEmptyRepoState(): RepoGitState {
   };
 }
 
-/** 从扁平 gitStore 状态提取 RepoGitState 快照 */
-function snapshotRepoState(s: GitState): RepoGitState {
-  return {
-    fileStatuses: s.fileStatuses,
-    branchInfo: s.branchInfo,
-    commitMessage: s.commitMessage,
-    isGitRepo: s.isGitRepo,
-    loading: s.loading,
-    operating: s.operating,
-    operationType: s.operationType,
-    generating: s.generating,
-    error: s.error,
-    stashEntries: s.stashEntries,
-    tagEntries: s.tagEntries,
-  };
-}
 
 interface GitState {
   fileStatuses: GitFileStatus[];
@@ -84,7 +68,6 @@ interface GitState {
   isGitRepo: boolean;
 
   refresh: (projectPath: string) => Promise<void>;
-  refreshLite: (projectPath: string) => Promise<void>;
   loadLog: (projectPath: string) => Promise<void>;
   loadDiff: (projectPath: string) => Promise<void>;
   loadDiffStaged: (projectPath: string) => Promise<void>;
@@ -123,7 +106,7 @@ interface GitState {
   /* ── 多仓库支持 ── */
   repoStates: Record<string, RepoGitState>;
   activeRepoPath: string | null;
-  refreshRepo: (projectPath: string) => Promise<void>;
+  refreshRepo: (projectPath: string, withBranch?: boolean) => Promise<void>;
   refreshAllRepos: (projectPaths: string[]) => Promise<void>;
   setActiveRepo: (projectPath: string | null) => void;
   getRepoState: (projectPath: string) => RepoGitState;
@@ -132,6 +115,8 @@ interface GitState {
 
 // Cancellation controller for refresh — only the latest refresh applies
 let refreshController: AbortController | null = null;
+let repoRefreshSequence = 0;
+const repoRefreshRequests = new Map<string, number>();
 
 export const useGitStore = create<GitState>((set, get) => ({
   fileStatuses: [],
@@ -165,43 +150,13 @@ export const useGitStore = create<GitState>((set, get) => ({
     refreshController = controller;
     const signal = controller.signal;
 
-    set({ loading: true });
-
-    let statuses: GitFileStatus[] = [];
-    let statusTruncated = false;
-    let branch: GitBranchInfo | null = null;
-    let isGitRepo = false;
-
-    try {
-      const result = await ipc.gitStatus(projectPath);
-      statuses = result.entries;
-      statusTruncated = result.truncated;
-      isGitRepo = true;
-    } catch {
-      // Not a git repo or other error
-    }
-
+    set({ loading: true, activeRepoPath: projectPath });
+    await get().refreshRepo(projectPath);
     if (signal.aborted) return;
-
-    try {
-      branch = await ipc.gitBranchInfo(projectPath);
-    } catch {
-      if (isGitRepo) branch = get().branchInfo;
-    }
-
-    if (signal.aborted) return;
-
-    set({ fileStatuses: statuses, statusTruncated, branchInfo: branch, isGitRepo, loading: false });
-
-    // 同步到 repoStates
-    set((s) => ({
-      repoStates: {
-        ...s.repoStates,
-        [projectPath]: { ...snapshotRepoState(get()), fileStatuses: statuses, branchInfo: branch, isGitRepo, loading: false },
-      },
-    }));
-
-    if (!isGitRepo) return;
+    set({ loading: false });
+    const repo = get().repoStates[projectPath];
+    if (!repo?.isGitRepo) return;
+    const statuses = repo.fileStatuses;
 
     // Reload diffs and log in parallel, respecting cancellation
     const loadDiff = async () => {
@@ -272,58 +227,6 @@ export const useGitStore = create<GitState>((set, get) => ({
     }
   },
 
-  refreshLite: async (projectPath) => {
-    // Lightweight refresh: only status + branchInfo (skip diff/log)
-    if (get().operating) return;
-
-    let statuses: GitFileStatus[] = [];
-    let statusTruncated = false;
-    let branch: GitBranchInfo | null = null;
-    let isGitRepo = false;
-
-    try {
-      const result = await ipc.gitStatus(projectPath);
-      statuses = result.entries;
-      statusTruncated = result.truncated;
-      isGitRepo = true;
-    } catch {
-      // Not a git repo or other error
-    }
-
-    try {
-      branch = await ipc.gitBranchInfo(projectPath);
-    } catch {
-      if (isGitRepo) branch = get().branchInfo;
-    }
-
-    // 浅比较：数据未变则跳过 set()，避免触发无意义的重渲染
-    const prev = get();
-    const statusChanged = !_shallowEqualStatuses(prev.fileStatuses, statuses);
-    const branchChanged = !_shallowEqualBranch(prev.branchInfo, branch);
-    const repoChanged = prev.isGitRepo !== isGitRepo;
-    if (statusChanged || branchChanged || repoChanged) {
-      const update: Partial<GitState> = {};
-      if (statusChanged) { update.fileStatuses = statuses; update.statusTruncated = statusTruncated; }
-      if (branchChanged) update.branchInfo = branch;
-      if (repoChanged) update.isGitRepo = isGitRepo;
-      set(update);
-    }
-
-    // 同步到 repoStates（无论扁平字段是否更新）
-    set((s) => {
-      const prev = s.repoStates[projectPath] || makeEmptyRepoState();
-      const repoStatusChanged = !_shallowEqualStatuses(prev.fileStatuses, statuses);
-      const repoBranchChanged = !_shallowEqualBranch(prev.branchInfo, branch);
-      const repoRepoChanged = prev.isGitRepo !== isGitRepo;
-      if (!repoStatusChanged && !repoBranchChanged && !repoRepoChanged) return {};
-      return {
-        repoStates: {
-          ...s.repoStates,
-          [projectPath]: { ...prev, fileStatuses: statuses, branchInfo: branch, isGitRepo },
-        },
-      };
-    });
-  },
 
   loadLog: async (projectPath) => {
     try {
@@ -755,7 +658,6 @@ export const useGitStore = create<GitState>((set, get) => ({
       generating: false,
       error: null,
       isGitRepo: false,
-      repoStates: {},
       activeRepoPath: null,
     });
   },
@@ -764,45 +666,64 @@ export const useGitStore = create<GitState>((set, get) => ({
    *  多仓库方法
    * ══════════════════════════════════════════ */
 
-  /** 轻量刷新单个仓库的 status + branch，只写 repoStates（不影响扁平字段） */
-  refreshRepo: async (projectPath) => {
+  /** Refresh a repository snapshot without attaching it to another repository's view. */
+  refreshRepo: async (projectPath, withBranch = true) => {
+    if (get().operating && get().activeRepoPath === projectPath) return;
+    const request = ++repoRefreshSequence;
+    repoRefreshRequests.set(projectPath, request);
     let statuses: GitFileStatus[] = [];
-    let branch: GitBranchInfo | null = null;
+    let statusTruncated = false;
+    let branch = get().repoStates[projectPath]?.branchInfo ?? null;
     let isGitRepo = false;
-
     try {
       const result = await ipc.gitStatus(projectPath);
       statuses = result.entries;
+      statusTruncated = result.truncated;
       isGitRepo = true;
-    } catch { /* not a git repo */ }
-
-    try {
-      branch = await ipc.gitBranchInfo(projectPath);
-    } catch { /* ignore */ }
-
-    // 浅比较：数据未变则跳过 set()，避免不必要的重渲染
-    set((s) => {
-      const prev = s.repoStates[projectPath];
-      if (prev) {
-        const statusSame = _shallowEqualStatuses(prev.fileStatuses, statuses);
-        const branchSame = _shallowEqualBranch(prev.branchInfo, branch);
-        const repoSame = prev.isGitRepo === isGitRepo;
-        if (statusSame && branchSame && repoSame) return {};
-      }
-      const base = prev || makeEmptyRepoState();
+    } catch {
+      branch = null;
+    }
+    if (repoRefreshRequests.get(projectPath) !== request) return;
+    if (isGitRepo && (withBranch || (get().activeRepoPath === projectPath && branch === null))) {
+      try { branch = await ipc.gitBranchInfo(projectPath); } catch { /* keep this repo's branch */ }
+    }
+    // A save or newer refresh may have superseded a slow polling response.
+    if (repoRefreshRequests.get(projectPath) !== request) return;
+    set((state) => {
+      const previous = state.repoStates[projectPath];
+      const repoChanged = !previous
+        || !_shallowEqualStatuses(previous.fileStatuses, statuses)
+        || !_shallowEqualBranch(previous.branchInfo, branch)
+        || previous.isGitRepo !== isGitRepo;
+      const active = state.activeRepoPath === projectPath;
+      const viewChanged = active && (
+        !_shallowEqualStatuses(state.fileStatuses, statuses)
+        || !_shallowEqualBranch(state.branchInfo, branch)
+        || state.isGitRepo !== isGitRepo
+        || state.statusTruncated !== statusTruncated
+      );
+      if (!repoChanged && !viewChanged) return state;
       return {
-        repoStates: {
-          ...s.repoStates,
-          [projectPath]: { ...base, fileStatuses: statuses, branchInfo: branch, isGitRepo },
-        },
+        ...(repoChanged ? {
+          repoStates: {
+            ...state.repoStates,
+            [projectPath]: {
+              ...(previous ?? makeEmptyRepoState()),
+              fileStatuses: statuses,
+              branchInfo: branch,
+              isGitRepo,
+            },
+          },
+        } : {}),
+        ...(viewChanged ? { fileStatuses: statuses, branchInfo: branch, isGitRepo, statusTruncated } : {}),
       };
     });
   },
 
-  /** 串行刷新所有仓库的 status + branch（避免并行 IPC 风暴） */
+  /** Background repositories only need file status; keep IPC work serial and lightweight. */
   refreshAllRepos: async (projectPaths) => {
-    for (const p of projectPaths) {
-      await get().refreshRepo(p);
+    for (const path of projectPaths) {
+      await get().refreshRepo(path, false);
     }
   },
 
@@ -865,24 +786,21 @@ function _shallowEqualBranch(a: GitBranchInfo | null, b: GitBranchInfo | null): 
   return a.name === b.name && a.remote === b.remote && a.ahead === b.ahead && a.behind === b.behind && a.is_detached === b.is_detached;
 }
 
-/** Targeted refresh after stage/unstage/discard: only reload status + diffs (skip log & branchInfo) */
+/** File mutations refresh repository status and the active view's diffs without clearing other roots. */
 async function _refreshAfterFileOp(
   projectPath: string,
   set: (partial: Partial<GitState>) => void,
   get: () => GitState,
 ) {
   try {
-    const [statusResult, diff, diffStaged] = await Promise.all([
-      ipc.gitStatus(projectPath),
+    const [, diff, diffStaged] = await Promise.all([
+      get().refreshRepo(projectPath, false),
       ipc.gitDiff(projectPath),
       ipc.gitDiffStaged(projectPath),
     ]);
-    const statuses = statusResult.entries;
-    set({ fileStatuses: statuses, statusTruncated: statusResult.truncated, diffText: diff, diffStagedText: diffStaged });
-
-    // 同步 status 到 repoStates
-    const prev = get().repoStates[projectPath] || makeEmptyRepoState();
-    set({ repoStates: { ...get().repoStates, [projectPath]: { ...prev, fileStatuses: statuses } } } as Partial<GitState>);
+    if (get().activeRepoPath !== projectPath) return;
+    const statuses = get().repoStates[projectPath]?.fileStatuses ?? [];
+    set({ diffText: diff, diffStagedText: diffStaged });
 
     const sel = get().selectedFile;
     if (sel) {
