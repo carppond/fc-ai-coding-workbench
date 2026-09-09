@@ -4,6 +4,7 @@ import { useProjectStore } from "../../stores/projectStore";
 import { useGitStore } from "../../stores/gitStore";
 import { useI18n } from "../../lib/i18n";
 import * as ipc from "../../ipc/commands";
+import { fileNameFromPath } from "../../lib/fileTreeGit";
 
 interface ContextInjectBarProps {
   onInject: (text: string) => void;
@@ -42,7 +43,7 @@ export function ContextInjectBar({ onInject }: ContextInjectBarProps) {
     if (!selected) return;
     try {
       const content = await ipc.readFileContent(selected as string);
-      const name = (selected as string).split("/").pop() || "";
+      const name = fileNameFromPath(selected as string);
       onInject(`\n**${name}:**\n\`\`\`\n${content}\n\`\`\`\n`);
     } catch (e) {
       console.error("Failed to read file:", e);

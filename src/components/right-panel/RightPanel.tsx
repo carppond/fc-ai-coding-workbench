@@ -10,6 +10,7 @@ import { GitDiffView } from "./GitDiffView";
 import { GitLog } from "./GitLog";
 import { GitActions } from "./GitActions";
 import { GitStash } from "./GitStash";
+import { fileNameFromPath, normalizePathKey } from "../../lib/fileTreeGit";
 
 function isValidGitUrl(url: string): boolean {
   const trimmed = url.trim();
@@ -157,10 +158,9 @@ export function RightPanel() {
 
   const effectiveProjectName = useMemo(() => {
     if (!effectivePath) return null;
-    const proj = projects.find((p) => p.path === effectivePath);
+    const proj = projects.find((p) => normalizePathKey(p.path) === normalizePathKey(effectivePath));
     if (proj) return proj.name;
-    const idx = Math.max(effectivePath.lastIndexOf("/"), effectivePath.lastIndexOf("\\"));
-    return idx >= 0 ? effectivePath.substring(idx + 1) : effectivePath;
+    return fileNameFromPath(effectivePath);
   }, [effectivePath, projects]);
 
   useEffect(() => {

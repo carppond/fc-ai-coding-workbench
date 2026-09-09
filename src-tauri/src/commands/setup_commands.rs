@@ -139,6 +139,20 @@ pub fn user_shell_path() -> &'static str {
             paths.extend(std::env::split_paths(
                 &std::env::var_os("PATH").unwrap_or_default(),
             ));
+            // GUI processes retain their startup PATH. Include standard
+            // installer locations before installation so Refresh can find
+            // newly installed Node/Git/PowerShell without restarting the app.
+            if let Some(program_files) = std::env::var_os("ProgramFiles") {
+                let root = PathBuf::from(program_files);
+                paths.push(root.join("PowerShell").join("7"));
+                paths.push(root.join("nodejs"));
+                paths.push(root.join("Git").join("cmd"));
+            }
+            if let Some(system_root) = std::env::var_os("SystemRoot") {
+                let system = PathBuf::from(system_root).join("System32");
+                paths.push(system.join("WindowsPowerShell").join("v1.0"));
+                paths.push(system);
+            }
             std::env::join_paths(paths)
                 .unwrap_or_default()
                 .to_string_lossy()
@@ -161,8 +175,8 @@ fn extract_semver(text: &str) -> Option<&str> {
 }
 
 async fn run_version_cmd(executable: Option<&Path>, path: &str, args: &[&str]) -> Option<String> {
-    let mut command = executable_command(executable?);
-    command.args(args).env("PATH", path);
+    let mut command = executable_command(executable?, args).ok()?;
+    command.env("PATH", path);
     command_output_with_timeout(&mut command, Duration::from_secs(5), None)
         .await
         .ok()
@@ -471,8 +485,8 @@ pub async fn run_install_command(
             Ok((path, executable))
         }).await?;
         let _ = app.emit("install-output", InstallOutput { line: format!("$ {} {}", executable.display(), args.join(" ")) });
-        let mut command = executable_command(&executable);
-        command.args(args).env("PATH", path).envs(crate::proxy::env_pairs())
+        let mut command = executable_command(&executable, args)?;
+        command.env("PATH", path).envs(crate::proxy::env_pairs())
             .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
         let mut child = command.spawn()?;
         let stdout = child.stdout.take().unwrap();

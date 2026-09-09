@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { Project } from "../lib/types";
 import * as ipc from "../ipc/commands";
 import { open } from "@tauri-apps/plugin-dialog";
+import { fileNameFromPath, normalizePathKey } from "../lib/fileTreeGit";
 
 interface ProjectState {
   projects: Project[];
@@ -82,10 +83,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!selected) return;
 
     const path = selected as string;
-    const name = path.split("/").pop() || path.split("\\").pop() || path;
+    const name = fileNameFromPath(path);
 
     try {
-      let project = get().projects.find((p) => p.path === path);
+      const key = normalizePathKey(path);
+      let project = get().projects.find((p) => normalizePathKey(p.path) === key);
       if (project) {
         await get().setActiveProject(project);
       } else {

@@ -10,9 +10,10 @@ import "@xterm/xterm/css/xterm.css";
 import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/700.css";
 import { listen } from "@tauri-apps/api/event";
-import { readText } from "@tauri-apps/plugin-clipboard-manager";
+import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import * as ipc from "../../ipc/commands";
 import { useSettingsStore, type Theme } from "../../stores/settingsStore";
+import { isTerminalHostShortcut } from "../../lib/terminalShortcuts";
 
 /** 当前是否运行在 Windows（用于启用 ConPTY 兼容处理）。 */
 const IS_WINDOWS = typeof navigator !== "undefined" && /Windows/.test(navigator.userAgent);
@@ -433,7 +434,6 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
   const fitAddonRef = useRef<FitAddon | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const sessionIdRef = useRef<string | null>(null);
-  const shellNameRef = useRef<string | null>(null);
   const rendererAddonRef = useRef<RendererAddon | null>(null);
   const lastPtySizeRef = useRef({ cols: 80, rows: 24 });
   const syncPtySizeRef = useRef<() => void>(() => {});
@@ -642,7 +642,7 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
         lastAwayFromBottom = away;
         setShowScrollBottom(away);
       }
-      if (scrollRepaintTimer) clearTimeout(scrollRepaintTimer);
+      clearTimeout(scrollRepaintTimer ?? undefined);
       scrollRepaintTimer = setTimeout(() => {
         scrollRepaintTimer = null;
         if (disposed) return;
@@ -653,24 +653,22 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
     const container = containerRef.current;
     const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent);
 
-    // --- Paste handling (with bracketed paste support for vim/nano) ---
-    const bracketedPaste = (text: string) => {
-      if (!sessionIdRef.current) return;
-      const shell = shellNameRef.current;
-      // cmd.exe and powershell don't support bracketed paste — send raw text
-      if (shell === "cmd" || shell === "cmd.exe" || shell === "pwsh" || shell === "pwsh.exe" || shell === "powershell" || shell === "powershell.exe") {
-        ipc.writeTerminal(sessionIdRef.current, text);
-      } else {
-        // Wrap in bracketed paste sequences so editors (vim, nano) handle it correctly
-        ipc.writeTerminal(sessionIdRef.current, `\x1b[200~${text}\x1b[201~`);
-      }
+    // The foreground program controls bracketed paste, not its parent shell.
+    // xterm also normalizes clipboard newlines before sending through onData.
+    const pasteText = (text: string) => {
+      if (sessionIdRef.current && !disposed) term.paste(text);
+    };
+    const pasteClipboard = () => {
+      readText().then((text) => {
+        if (text) pasteText(text);
+      }).catch((error) => console.error("Failed to read terminal clipboard:", error));
     };
 
     const handlePaste = (e: ClipboardEvent) => {
       e.preventDefault();
       e.stopImmediatePropagation();
       const text = e.clipboardData?.getData("text");
-      if (text) bracketedPaste(text);
+      if (text) pasteText(text);
     };
     container.addEventListener("paste", handlePaste, true);
 
@@ -689,41 +687,44 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
         return false;
       }
 
-      // Cmd+W (Mac) / Ctrl+W (Win/Linux) → 关闭当前面板（由 CenterPanel 全局处理）
-      if (e.key === "w" && (isMac ? e.metaKey : e.ctrlKey)) {
+      // Host close is handled by CenterPanel; bare Ctrl+W belongs to the CLI.
+      if (isTerminalHostShortcut(e, "w", isMac)) {
         return false;
       }
 
-      // Cmd/Ctrl+V → paste from clipboard
-      if (e.key === "v" && (isMac ? e.metaKey : e.ctrlKey)) {
-        return false; // Let browser paste event handle it
+      // Native clipboard access also supports WebView2 when browser paste fails.
+      if (e.key.toLowerCase() === "v" && !e.altKey && (isMac ? e.metaKey : e.ctrlKey)) {
+        e.preventDefault();
+        e.stopPropagation();
+        pasteClipboard();
+        return false;
       }
 
       // Cmd/Ctrl+C → copy if selection, otherwise pass through (SIGINT)
-      if (e.key === "c" && (e.ctrlKey || e.metaKey)) {
+      if (e.key.toLowerCase() === "c" && !e.altKey && (e.ctrlKey || (isMac && e.metaKey))) {
         const selection = term.getSelection();
         if (selection) {
           e.preventDefault();
           e.stopPropagation();
-          // 使用 Web API 复制，不走 Tauri IPC，避免终端失焦导致滚动
-          navigator.clipboard.writeText(selection).catch(() => {});
+          writeText(selection).catch((error) => console.error("Failed to copy terminal selection:", error));
           return false;
         }
-        // Ctrl+C without selection → pass to PTY as SIGINT
+        // Dedicated host copy does nothing without a selection; Ctrl+C interrupts.
+        if (isTerminalHostShortcut(e, "c", isMac)) return false;
         if (e.ctrlKey) return true;
         // Cmd+C without selection on macOS → ignore (not a terminal signal)
         return false;
       }
 
-      // Cmd/Ctrl+F → toggle search bar
-      if (e.key === "f" && (e.ctrlKey || e.metaKey)) {
+      // Cmd+F / Ctrl+Shift+F → search; Ctrl+F remains available to the CLI.
+      if (isTerminalHostShortcut(e, "f", isMac)) {
         e.preventDefault();
         toggleSearchRef.current();
         return false;
       }
 
-      // Cmd+K → clear scrollback (macOS convention)
-      if (e.key === "k" && e.metaKey) {
+      // Cmd+K / Ctrl+Shift+K → clear scrollback.
+      if (isTerminalHostShortcut(e, "k", isMac)) {
         e.preventDefault();
         term.clear();
         return false;
@@ -745,9 +746,7 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
         term.write("\r\n\x1b[33m[Terminal is starting...]\x1b[0m\r\n");
         return;
       }
-      readText().then((text) => {
-        if (text) bracketedPaste(text);
-      }).catch(() => { /* clipboard empty or permission denied */ });
+      pasteClipboard();
     };
     container.addEventListener("contextmenu", handleContextMenu);
 
@@ -852,13 +851,12 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
 
     // Set up event listeners and state after obtaining a session.
     // Async: awaits listener registration, then flushes buffered PTY output.
-    const setupSession = async (sessionId: string, shellName: string) => {
+    const setupSession = async (sessionId: string) => {
       if (disposed) {
         ipc.killTerminal(sessionId);
         return;
       }
       sessionIdRef.current = sessionId;
-      shellNameRef.current = shellName;
 
       // Register listeners BEFORE subscribing so no output is lost
       unlistenOutputFn = await listen<ipc.TerminalOutputChunk>(`terminal-output-${sessionId}`, (event) => {
@@ -900,25 +898,26 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
           }
           if (result) {
             // Got a pre-warmed session — set up listener & subscribe first, then cd
-            await setupSession(result[0], result[1]);
+            await setupSession(result[0]);
             if (disposed) return;
             if (path) {
               const el = containerRef.current;
               if (el) el.style.visibility = "hidden";
-              ipc.terminalCd(result[0], path).finally(() => {
+              await ipc.terminalCd(result[0], path).finally(() => {
                 setTimeout(() => { if (el) el.style.visibility = ""; }, 150);
               });
             }
           } else {
             // No warmup available — normal spawn
-            const [sessionId, shellName] = await ipc.spawnTerminal(path ?? undefined, term.rows, term.cols);
-            await setupSession(sessionId, shellName);
+            const [sessionId] = await ipc.spawnTerminal(path ?? undefined, term.rows, term.cols);
+            await setupSession(sessionId);
           }
         })
         .catch((err) => {
           if (disposed) return;
           if (sessionIdRef.current) ipc.killTerminal(sessionIdRef.current).catch(() => {});
           term.write(`\r\n\x1b[31m[Failed to spawn terminal: ${err}]\x1b[0m\r\n`);
+          onSessionReady?.(null);
           onAliveChange?.(false);
         });
     });
@@ -1015,8 +1014,8 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
       container.removeEventListener("contextmenu", handleContextMenu);
       window.removeEventListener("terminal-drag-start", onDragStart);
       window.removeEventListener("terminal-drag-end", onDragEnd);
-      if (resizeTimer) clearTimeout(resizeTimer);
-      if (dragEndTimer) clearTimeout(dragEndTimer);
+      clearTimeout(resizeTimer ?? undefined);
+      clearTimeout(dragEndTimer ?? undefined);
       writeQueue.clear();
       flushWritesRef.current = null;
       clearTimeout(scrollRepaintTimer ?? undefined);
@@ -1035,7 +1034,6 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
       searchAddonRef.current = null;
       rendererAddonRef.current = null;
       sessionIdRef.current = null;
-      shellNameRef.current = null;
     };
   }, []); // only mount once
 

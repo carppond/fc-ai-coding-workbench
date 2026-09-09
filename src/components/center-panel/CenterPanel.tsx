@@ -10,9 +10,12 @@ import { FileViewer } from "./FileViewer";
 import { useConfirm } from "../common/ConfirmDialog";
 import * as ipc from "../../ipc/commands";
 import { useSettingsStore } from "../../stores/settingsStore";
-import { CODING_CLI_INFO, type CliLaunchAction } from "../../lib/codingCli";
+import { CODING_CLI_INFO, type CliLaunchAction, type CodingCli } from "../../lib/codingCli";
 import { CodingCliSettings } from "../common/CodingCliSettings";
+import { ToolSetupDialog } from "../common/ToolSetupDialog";
 import { useToast } from "../common/Toast";
+import { fileNameFromPath } from "../../lib/fileTreeGit";
+import { isTerminalHostShortcut } from "../../lib/terminalShortcuts";
 import {
   LayoutNode, LayoutLeaf,
   countLeaves, splitLeaf, removeLeaf,
@@ -117,6 +120,8 @@ export function CenterPanel() {
   const codingCli = useSettingsStore((s) => s.codingCli);
   const ompApprovalMode = useSettingsStore((s) => s.ompApprovalMode);
   const envCache = useSettingsStore((s) => s.envCache);
+  const loadEnvironment = useSettingsStore((s) => s.loadEnvironment);
+  const [setupTool, setSetupTool] = useState<CodingCli | null>(null);
   const [launching, setLaunching] = useState(false);
   const launchInFlightRef = useRef(false);
 
@@ -195,7 +200,7 @@ export function CenterPanel() {
   /* ── 项目切换重置 ── */
   const prevProjectIdRef = useRef(projectId);
   useEffect(() => {
-    if (projectId !== null && prevProjectIdRef.current !== null && projectId !== prevProjectIdRef.current) {
+    if (projectId !== null && projectId !== prevProjectIdRef.current) {
       tabCounterRef.current = 1;
       const tab = makeTab("Terminal 1");
       setTabs([tab]);
@@ -258,7 +263,7 @@ export function CenterPanel() {
   const handleAddTab = useCallback((cwd?: string) => {
     if (openFilePath) closeFile();
     tabCounterRef.current += 1;
-    const title = cwd ? cwd.split("/").pop() || cwd : `Terminal ${tabCounterRef.current}`;
+    const title = cwd ? fileNameFromPath(cwd) : `Terminal ${tabCounterRef.current}`;
     const tab = makeTab(title, cwd);
     setTabs((prev) => {
       if (prev.length >= MAX_TABS) return prev;
@@ -299,17 +304,17 @@ export function CenterPanel() {
 
   /* ── 关闭 Pane（二叉树版）── */
   const handleClosePane = useCallback((tabId: string, paneId: string) => {
-    // 清理旧 pane 的 session/focus/portal 映射
-    sessionMapRef.current.delete(paneId);
-    focusMapRef.current.delete(paneId);
-    portalHostRef.current.delete(paneId);
     setTabs((prev) => {
       const tab = prev.find((t) => t.id === tabId);
       if (!tab) return prev;
       const newLayout = removeLeaf(tab.layout, paneId);
+      // Keeping the last pane must also keep its live session and portal.
+      if (newLayout === null && prev.length <= 1) return prev;
+      sessionMapRef.current.delete(paneId);
+      focusMapRef.current.delete(paneId);
+      portalHostRef.current.delete(paneId);
       if (newLayout === null) {
         // 最后一个 pane → 关闭 tab
-        if (prev.length <= 1) return prev;
         const idx = prev.findIndex((t) => t.id === tabId);
         const next = prev.filter((t) => t.id !== tabId);
         setActiveTabId((cur) => {
@@ -354,11 +359,14 @@ export function CenterPanel() {
     }
   }, []);
 
-  /* ── Cmd+W / Ctrl+W 关闭当前面板 ── */
+  /* ── Close pane without stealing terminal Ctrl+W ── */
   useEffect(() => {
     const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent);
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "w" && (isMac ? e.metaKey : e.ctrlKey)) {
+      const closeShortcut = activeTab === "file"
+        ? e.key.toLowerCase() === "w" && !e.altKey && (isMac ? e.metaKey : e.ctrlKey)
+        : isTerminalHostShortcut(e, "w", isMac);
+      if (closeShortcut) {
         e.preventDefault();
         if (activeTab === "file") {
           if (isDirty) {
@@ -421,8 +429,15 @@ export function CenterPanel() {
 
     launchInFlightRef.current = true;
     setLaunching(true);
-    const file = useFileStore.getState();
     try {
+      await loadEnvironment();
+      const settings = useSettingsStore.getState();
+      if (settings.codingCli !== codingCli || sessionMapRef.current.get(paneId) !== sessionId) return;
+      if (!settings.envCache?.clis[codingCli].installed) {
+        setSetupTool(codingCli);
+        return;
+      }
+      const file = useFileStore.getState();
       if (file.openFilePath && file.isDirty) {
         const discard = await confirm({
           message: t("fileViewer.unsavedChanges"),
@@ -449,7 +464,7 @@ export function CenterPanel() {
       launchInFlightRef.current = false;
       setLaunching(false);
     }
-  }, [activeTabId, tabs, codingCli, ompApprovalMode, closeFile, getActivePaneId, confirm, t, toast]);
+  }, [activeTabId, tabs, codingCli, ompApprovalMode, closeFile, getActivePaneId, confirm, t, toast, loadEnvironment]);
 
   const selectedTab = tabs.find((tab) => tab.id === activeTabId);
   const selectedPaneId = selectedTab ? getActivePaneId(selectedTab) : "";
@@ -578,7 +593,7 @@ export function CenterPanel() {
           {showPaneHeader && (
             <div className={`pane-header ${isFocused ? "pane-header--active" : ""}`}>
               <span className="pane-header__title">
-                {node.cwd ? node.cwd.split("/").pop() : "Terminal"}
+                {node.cwd ? fileNameFromPath(node.cwd) : "Terminal"}
               </span>
               <span
                 className="pane-header__close"
@@ -741,7 +756,7 @@ export function CenterPanel() {
           >
             {isDirty && <span className="panel-tab__dirty-dot" />}
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {openFilePath.split("/").pop()}
+              {fileNameFromPath(openFilePath)}
             </span>
             <span
               className="panel-tab__close"
@@ -797,7 +812,12 @@ export function CenterPanel() {
             </button>
           </div>
           {!cliAvailable && (
-            <span className="cli-launcher__hint">{t("cli.notInstalled").replace("{cli}", CODING_CLI_INFO[codingCli].label)}</span>
+            <div className="cli-launcher__hint">
+              <span>{t("cli.notInstalled").replace("{cli}", CODING_CLI_INFO[codingCli].label)}</span>
+              <button className="btn btn--ghost btn--sm" onClick={() => setSetupTool(codingCli)}>
+                {t("env.configureTool").replace("{tool}", CODING_CLI_INFO[codingCli].label)}
+              </button>
+            </div>
           )}
         </div>
 
@@ -917,6 +937,7 @@ export function CenterPanel() {
           </div>
         </div>
       )}
+      {setupTool && <ToolSetupDialog tool={setupTool} onClose={() => setSetupTool(null)} />}
     </div>
   );
 }

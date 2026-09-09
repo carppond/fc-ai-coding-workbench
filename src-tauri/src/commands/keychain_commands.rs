@@ -56,3 +56,25 @@ pub fn detect_env_api_keys() -> AppResult<HashMap<String, String>> {
     }
     Ok(found)
 }
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn api_keys_persist_across_entries_in_windows_credential_manager() {
+        // Use a unique synthetic provider; never access a configured API key.
+        let provider = format!("windows-regression-{}", uuid::Uuid::new_v4());
+        let secret = "synthetic-regression-value";
+        set_api_key(provider.clone(), secret.to_string()).unwrap();
+        let present = has_api_key(provider.clone());
+        let retrieved =
+            keyring::Entry::new(SERVICE_NAME, &provider).and_then(|entry| entry.get_password());
+        // Always clean up the temporary credential before any assertion.
+        let deleted = delete_api_key(provider.clone());
+        assert!(present.unwrap());
+        assert_eq!(retrieved.unwrap(), secret);
+        deleted.unwrap();
+        assert!(!has_api_key(provider).unwrap());
+    }
+}

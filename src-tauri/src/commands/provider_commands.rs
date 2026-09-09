@@ -18,6 +18,14 @@ pub fn preload_shell_env() {
     });
 }
 
+#[cfg(windows)]
+fn capture_shell_env() -> HashMap<String, String> {
+    // Windows process environments already contain the user's variables.
+    // Do not run a Unix SHELL inherited from Git Bash with incompatible flags.
+    std::env::vars().collect()
+}
+
+#[cfg(not(windows))]
 fn capture_shell_env() -> HashMap<String, String> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     let home = dirs::home_dir().unwrap_or_default();
@@ -199,9 +207,11 @@ pub async fn generate_commit_message(project_path: String, cli: CodingCli) -> Ap
 
     // Ephemeral, tool-free generation uses only the selected CLI's own configuration.
     // Reuse the lazy shell environment cache without copying keys between CLIs.
-    let mut cmd = executable_command(&executable);
-    cmd.args(["--print", "--no-session", "--no-tools", "--no-extensions"])
-        .current_dir(&project_path)
+    let mut cmd = executable_command(
+        &executable,
+        &["--print", "--no-session", "--no-tools", "--no-extensions"],
+    )?;
+    cmd.current_dir(&project_path)
         .env_clear()
         .envs(shell_env)
         .env("PATH", path)

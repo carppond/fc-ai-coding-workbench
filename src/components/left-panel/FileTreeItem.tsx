@@ -6,7 +6,7 @@ import { useProjectStore } from "../../stores/projectStore";
 import { useI18n } from "../../lib/i18n";
 import { useConfirm } from "../common/ConfirmDialog";
 import * as ipc from "../../ipc/commands";
-import { findProjectRoot, normalizePathKey } from "../../lib/fileTreeGit";
+import { findProjectRoot, joinProjectPath, normalizePathKey, parentDirectory } from "../../lib/fileTreeGit";
 
 interface FileTreeItemProps {
   entry: DirEntry;
@@ -186,10 +186,6 @@ export const FileTreeItem = memo(function FileTreeItem({ entry, depth, defaultEx
     globalCloseMenu = () => setContextMenu(null);
   };
 
-  const getParentPath = (filePath: string) => {
-    const idx = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
-    return idx > 0 ? filePath.substring(0, idx) : filePath;
-  };
 
   const startRename = () => {
     setEditValue(entry.name);
@@ -223,7 +219,7 @@ export const FileTreeItem = memo(function FileTreeItem({ entry, depth, defaultEx
     if (!(await confirm({ title: t("fileTree.delete"), message: msg, confirmLabel: t("confirm.delete") }))) return;
     try {
       await ipc.deleteEntry(entry.path);
-      const parent = getParentPath(entry.path);
+      const parent = parentDirectory(entry.path);
       refreshParent(parent);
     } catch {
       // ignore
@@ -248,16 +244,14 @@ export const FileTreeItem = memo(function FileTreeItem({ entry, depth, defaultEx
 
     try {
       if (editing === "rename") {
-        const parent = getParentPath(entry.path);
-        const sep = entry.path.includes("\\") ? "\\" : "/";
-        const newPath = parent + sep + value;
+        const parent = parentDirectory(entry.path);
+        const newPath = joinProjectPath(parent, value);
         if (newPath !== entry.path) {
           await ipc.renameEntry(entry.path, newPath);
           refreshParent(parent);
         }
       } else if (editing === "newFile" || editing === "newFolder") {
-        const sep = entry.path.includes("\\") ? "\\" : "/";
-        const newPath = entry.path + sep + value;
+        const newPath = joinProjectPath(entry.path, value);
         await ipc.createFileOrDir(newPath, editing === "newFolder");
         refreshParent(entry.path);
       }

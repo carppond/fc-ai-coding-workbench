@@ -5,6 +5,7 @@ import { useFileStore } from "../../stores/fileStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useI18n } from "../../lib/i18n";
 import { useConfirm } from "../common/ConfirmDialog";
+import { joinProjectPath } from "../../lib/fileTreeGit";
 
 const VISIBLE_LIMIT = 100;
 
@@ -156,7 +157,7 @@ export function GitStatusList() {
                 </button>
                 <button
                   className="git-file-entry__action"
-                  onClick={(e) => { e.stopPropagation(); gitPath && openFile(gitPath + "/" + f.path); }}
+                  onClick={(e) => { e.stopPropagation(); gitPath && openFile(joinProjectPath(gitPath, f.path)); }}
                   title={t("git.resolveEdit")}
                 >
                   <FileEdit size={13} />

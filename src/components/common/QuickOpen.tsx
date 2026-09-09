@@ -4,6 +4,7 @@ import { useProjectStore } from "../../stores/projectStore";
 import { useFileStore } from "../../stores/fileStore";
 import { useI18n } from "../../lib/i18n";
 import * as ipc from "../../ipc/commands";
+import { fileNameFromPath, joinProjectPath, parentDirectory } from "../../lib/fileTreeGit";
 
 interface QuickOpenProps {
   visible: boolean;
@@ -69,7 +70,7 @@ export function QuickOpen({ visible, onClose }: QuickOpenProps) {
     const scored: { path: string; score: number }[] = [];
     for (const path of files) {
       // 对文件名和完整路径分别匹配，文件名匹配优先
-      const fileName = path.split("/").pop() || path;
+      const fileName = fileNameFromPath(path);
       const nameScore = fuzzyMatch(query, fileName);
       const pathScore = fuzzyMatch(query, path);
       const best = nameScore >= 0
@@ -99,7 +100,7 @@ export function QuickOpen({ visible, onClose }: QuickOpenProps) {
   const handleSelect = useCallback(
     (path: string) => {
       if (!activeProject) return;
-      const fullPath = activeProject.path + "/" + path;
+      const fullPath = joinProjectPath(activeProject.path, path);
       openFile(fullPath);
       onClose();
     },
@@ -149,10 +150,8 @@ export function QuickOpen({ visible, onClose }: QuickOpenProps) {
             <div className="quick-open__empty">{t("quickOpen.noResults")}</div>
           ) : (
             results.map((item, index) => {
-              const fileName = item.path.split("/").pop() || item.path;
-              const dirPath = item.path.includes("/")
-                ? item.path.substring(0, item.path.lastIndexOf("/"))
-                : "";
+              const fileName = fileNameFromPath(item.path);
+              const dirPath = parentDirectory(item.path);
               return (
                 <div
                   key={item.path}

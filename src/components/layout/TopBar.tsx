@@ -201,6 +201,7 @@ function ShortcutsReference() {
   const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent);
   const mod = isMac ? "Command" : "Ctrl";
   const shift = "Shift";
+  const terminalMod = isMac ? mod : `${mod} + ${shift}`;
 
   const groups = [
     {
@@ -210,7 +211,6 @@ function ShortcutsReference() {
         { keys: `${mod} + N`, desc: t("shortcuts.newSession") },
         { keys: `${mod} + Enter`, desc: t("shortcuts.send") },
         { keys: `${mod} + K`, desc: t("shortcuts.focusSearch") },
-        { keys: `${mod} + W`, desc: t("shortcuts.closePane") },
         { keys: "Escape", desc: t("shortcuts.close") },
       ],
     },
@@ -218,6 +218,7 @@ function ShortcutsReference() {
       title: t("shortcuts.editor"),
       items: [
         { keys: `${mod} + S`, desc: t("shortcuts.save") },
+        { keys: `${mod} + W`, desc: t("shortcuts.closePane") },
         { keys: "Tab", desc: t("shortcuts.indent") },
         { keys: `${mod} + Z`, desc: t("shortcuts.undo") },
         { keys: `${shift} + ${mod} + Z`, desc: t("shortcuts.redo") },
@@ -227,10 +228,11 @@ function ShortcutsReference() {
     {
       title: t("shortcuts.terminal"),
       items: [
-        { keys: `${mod} + F`, desc: t("shortcuts.termSearch") },
-        { keys: `${mod} + K`, desc: t("shortcuts.termClear") },
-        { keys: `${mod} + C`, desc: t("shortcuts.termCopy") },
-        { keys: `${mod} + V`, desc: t("shortcuts.termPaste") },
+        { keys: `${terminalMod} + F`, desc: t("shortcuts.termSearch") },
+        { keys: `${terminalMod} + K`, desc: t("shortcuts.termClear") },
+        { keys: `${terminalMod} + C`, desc: t("shortcuts.termCopy") },
+        { keys: `${terminalMod} + V`, desc: t("shortcuts.termPaste") },
+        { keys: `${terminalMod} + W`, desc: t("shortcuts.closePane") },
         { keys: `${shift} + Enter`, desc: t("shortcuts.termNewline") },
       ],
     },

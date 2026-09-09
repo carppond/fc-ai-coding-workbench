@@ -78,7 +78,38 @@ impl Drop for TerminalSession {
         self.alive.store(false, Ordering::Relaxed);
         self.output_window.close();
         if let Ok(mut child) = self.child.lock() {
-            let _ = child.kill();
+            if let Err(error) = child.kill() {
+                eprintln!("Failed to terminate terminal {}: {error}", self.id);
+            }
+            // portable-pty 0.8.1 discards Windows TerminateProcess failures,
+            // so observe the process rather than trusting kill() or entering
+            // its unbounded WaitForSingleObject(INFINITE).
+            #[cfg(windows)]
+            {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+                loop {
+                    match child.try_wait() {
+                        Ok(Some(_)) => break,
+                        Err(error) => {
+                            eprintln!(
+                                "Failed to observe terminal {} exit: {error}; closing ConPTY",
+                                self.id
+                            );
+                            break;
+                        }
+                        Ok(None) => {}
+                    }
+                    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                    if remaining.is_zero() {
+                        eprintln!("Terminal {} exit was not observed before the shutdown deadline; closing ConPTY", self.id);
+                        break;
+                    }
+                    std::thread::sleep(remaining.min(std::time::Duration::from_millis(10)));
+                }
+            }
+            // Windows needs no Unix-style zombie reaping. Closing the master
+            // next shuts down ConPTY and signals any clients still attached.
+            #[cfg(not(windows))]
             let _ = child.wait();
         }
     }
@@ -92,6 +123,15 @@ impl TerminalSession {
         cols: u16,
     ) -> Result<Self, String> {
         let session_id = uuid::Uuid::new_v4().to_string();
+        // --- Shell detection ---
+        let shell = Self::detect_shell()?;
+        let shell_name = std::path::Path::new(&shell)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("sh")
+            .to_string();
+        #[cfg(windows)]
+        let shell_name = shell_name.to_ascii_lowercase();
 
         let pty_system = native_pty_system();
 
@@ -105,14 +145,6 @@ impl TerminalSession {
         let pair = pty_system
             .openpty(size)
             .map_err(|e| format!("Failed to open PTY: {}", e))?;
-
-        // --- Shell detection ---
-        let shell = Self::detect_shell();
-        let shell_name = std::path::Path::new(&shell)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("sh")
-            .to_string();
 
         let mut cmd = CommandBuilder::new(&shell);
 
@@ -147,6 +179,10 @@ impl TerminalSession {
         for (key, val) in std::env::vars() {
             cmd.env(key, val);
         }
+        // A GUI process keeps its startup PATH. The same installer locations
+        // used by environment detection must also reach CLI child processes.
+        #[cfg(windows)]
+        cmd.env("PATH", crate::commands::setup_commands::user_shell_path());
         // Inject proxy environment variables (overrides inherited values)
         for (key, val) in crate::proxy::env_pairs() {
             cmd.env(key, val);
@@ -156,18 +192,7 @@ impl TerminalSession {
         cmd.env("AI_WORKBENCH_TERMINAL", "1");
         cmd.env("FORCE_COLOR", "1");
 
-        // On Windows, ConPTY intercepts terminal capability queries (Device
-        // Attributes, Kitty keyboard protocol, OSC 52, etc.) without forwarding
-        // responses. Setting TERM_PROGRAM to an unrecognized value causes TUI
-        // apps to probe capabilities and hang or misrender.
-        // Use "xterm" on Windows — universally recognized, no special integration
-        // logic, and compatible with ConPTY's rendering behavior.
-        if cfg!(target_os = "windows") {
-            cmd.env("TERM_PROGRAM", "xterm");
-        } else {
-            cmd.env("TERM_PROGRAM", "ShiGuang");
-            cmd.env("TERM_FEATURES", "truecolor:clipboard:title:hyperlinks");
-        }
+        Self::setup_terminal_capabilities(&mut cmd);
 
         // --- Cross-shell prompt inhibitors ---
         // These disable third-party prompt tools across all shells.
@@ -189,7 +214,7 @@ impl TerminalSession {
             "bash" => Self::setup_bash_prompt(&mut cmd, &user_home, &session_id),
             "fish" => Self::setup_fish_prompt(&mut cmd, &user_home, &session_id),
             "pwsh" | "pwsh.exe" | "powershell" | "powershell.exe" => {
-                Self::setup_powershell_prompt(&mut cmd, &user_home);
+                Self::setup_powershell_prompt(&mut cmd);
             }
             "cmd" | "cmd.exe" => {
                 // cmd.exe: set PROMPT env var for clean prompt
@@ -201,11 +226,6 @@ impl TerminalSession {
             }
         }
 
-        let child = pair
-            .slave
-            .spawn_command(cmd)
-            .map_err(|e| format!("Failed to spawn shell: {}", e))?;
-
         let reader = pair
             .master
             .try_clone_reader()
@@ -215,6 +235,11 @@ impl TerminalSession {
             .master
             .take_writer()
             .map_err(|e| format!("Failed to take writer: {}", e))?;
+
+        let child = pair
+            .slave
+            .spawn_command(cmd)
+            .map_err(|e| format!("Failed to spawn shell: {}", e))?;
 
         let alive = Arc::new(AtomicBool::new(true));
         let alive_clone = alive.clone();
@@ -305,6 +330,13 @@ impl TerminalSession {
                     }
                 }
             }
+            // ClosePseudoConsole may write a final frame and wait for it to be
+            // consumed on Windows before 11 24H2. portable-pty retains another
+            // read handle until after HPCON is dropped, so closing this reader
+            // alone does not close the pipe. Once delivery stops, keep draining
+            // without frontend credits until ConPTY closes the output pipe.
+            #[cfg(windows)]
+            let _ = std::io::copy(&mut reader, &mut std::io::sink());
         });
 
         // Coalesce for at most 5ms, then reserve credits until xterm parses them.
@@ -398,6 +430,7 @@ impl TerminalSession {
         //                faster than its internal processing can drain.
         // Normal keystrokes (< chunk_size) skip chunking entirely.
         let (write_tx, write_rx) = std_mpsc::channel::<String>();
+        let writer_alive = Arc::clone(&alive);
         std::thread::spawn(move || {
             let mut writer = writer;
             let chunk_size: usize = if cfg!(target_os = "windows") {
@@ -406,18 +439,32 @@ impl TerminalSession {
                 65536
             };
             for data in write_rx {
+                if !writer_alive.load(Ordering::Acquire) {
+                    break;
+                }
                 let bytes = data.as_bytes();
                 if bytes.len() > chunk_size {
                     for chunk in bytes.chunks(chunk_size) {
-                        let _ = writer.write_all(chunk);
-                        let _ = writer.flush();
+                        if !writer_alive.load(Ordering::Acquire)
+                            || writer
+                                .write_all(chunk)
+                                .and_then(|()| writer.flush())
+                                .is_err()
+                        {
+                            return;
+                        }
                         if cfg!(target_os = "windows") {
                             std::thread::sleep(std::time::Duration::from_millis(1));
                         }
                     }
                 } else {
-                    let _ = writer.write_all(bytes);
-                    let _ = writer.flush();
+                    if writer
+                        .write_all(bytes)
+                        .and_then(|()| writer.flush())
+                        .is_err()
+                    {
+                        return;
+                    }
                 }
             }
         });
@@ -474,31 +521,46 @@ impl TerminalSession {
 
     // ── Shell detection ─────────────────────────────────────────────
 
-    fn detect_shell() -> String {
-        if cfg!(target_os = "windows") {
-            // Windows: try pwsh (PS 7+) → powershell (PS 5.x) → cmd
-            for candidate in &["pwsh.exe", "powershell.exe", "cmd.exe"] {
-                if std::process::Command::new(candidate)
-                    .arg("/?")
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .status()
-                    .is_ok()
-                {
-                    return candidate.to_string();
-                }
-            }
-            "cmd.exe".to_string()
+    fn detect_shell() -> Result<std::path::PathBuf, String> {
+        #[cfg(windows)]
+        {
+            Self::detect_windows_shell(crate::commands::setup_commands::user_shell_path())
+        }
+        #[cfg(not(windows))]
+        {
+            // Unix: prefer $SHELL, fallback to common shells.
+            Ok(std::env::var_os("SHELL")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| {
+                    ["/bin/zsh", "/bin/bash", "/bin/sh"]
+                        .into_iter()
+                        .map(std::path::PathBuf::from)
+                        .find(|path| path.exists())
+                        .unwrap_or_else(|| "/bin/sh".into())
+                }))
+        }
+    }
+
+    #[cfg(windows)]
+    fn detect_windows_shell(path: &str) -> Result<std::path::PathBuf, String> {
+        // Resolve files only: starting PowerShell to probe it also runs profiles
+        // and can wait indefinitely for interactive input.
+        ["pwsh.exe", "powershell.exe", "cmd.exe"]
+            .into_iter()
+            .find_map(|program| crate::coding_cli::resolve_program(program, path).ok())
+            .ok_or_else(|| "No PowerShell or cmd executable found in PATH".to_string())
+    }
+
+    fn setup_terminal_capabilities(cmd: &mut CommandBuilder) {
+        if cfg!(windows) {
+            // ConPTY intercepts capability queries without forwarding responses.
+            // Remove inherited values too; an unknown terminal identity can make
+            // CLI clients probe indefinitely.
+            cmd.env_remove("TERM_PROGRAM");
+            cmd.env_remove("TERM_FEATURES");
         } else {
-            // Unix: prefer $SHELL, fallback to common shells
-            std::env::var("SHELL").unwrap_or_else(|_| {
-                for candidate in &["/bin/zsh", "/bin/bash", "/bin/sh"] {
-                    if std::path::Path::new(candidate).exists() {
-                        return candidate.to_string();
-                    }
-                }
-                "/bin/sh".to_string()
-            })
+            cmd.env("TERM_PROGRAM", "ShiGuang");
+            cmd.env("TERM_FEATURES", "truecolor:clipboard:title:hyperlinks");
         }
     }
 
@@ -621,34 +683,21 @@ end
         cmd.args(["--init-command", &init]);
     }
 
-    /// PowerShell (pwsh/powershell): use -Command to override prompt function.
-    fn setup_powershell_prompt(cmd: &mut CommandBuilder, user_home: &str) {
-        // Build a command that:
-        // 1. Sources user's profile (if it exists)
-        // 2. Overrides the prompt function
-        // 3. Clears the screen
-        let profile_path = if cfg!(target_os = "windows") {
-            format!(
-                "{}\\Documents\\PowerShell\\Microsoft.PowerShell_profile.ps1",
-                user_home
-            )
-        } else {
-            format!("{}/.config/powershell/profile.ps1", user_home)
-        };
-
-        let ps_init = format!(
-            concat!(
-                "if (Test-Path '{}') {{ . '{}' }}; ",
-                "function global:prompt {{ ",
-                "$dir = Split-Path -Leaf (Get-Location); ",
-                "Write-Host -NoNewline -ForegroundColor Cyan $dir; ",
-                "return ' $ ' ",
-                "}}; ",
-                "Clear-Host"
-            ),
-            profile_path, profile_path,
+    /// PowerShell loads the appropriate PS5/PS7 and redirected-home profiles
+    /// normally before -Command; never guess their paths or source them twice.
+    fn setup_powershell_prompt(cmd: &mut CommandBuilder) {
+        let ps_init = concat!(
+            "[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false); ",
+            "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); ",
+            "$global:OutputEncoding = [Console]::OutputEncoding; ",
+            "function global:prompt { ",
+            "$dir = Split-Path -Leaf (Get-Location); ",
+            "Write-Host -NoNewline -ForegroundColor Cyan $dir; ",
+            "return ' $ ' ",
+            "}; ",
+            "Clear-Host"
         );
-        cmd.args(["-Command", &ps_init]);
+        cmd.args(["-Command", ps_init]);
     }
 
     // ── Cleanup ─────────────────────────────────────────────────────
@@ -668,6 +717,95 @@ end
                     let _ = std::fs::remove_dir_all(entry.path());
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inherited_capability_hints_follow_the_platform_contract() {
+        let mut cmd = CommandBuilder::new("shell");
+        cmd.env("TERM_PROGRAM", "parent-terminal");
+        cmd.env("TERM_FEATURES", "parent-features");
+        TerminalSession::setup_terminal_capabilities(&mut cmd);
+        if cfg!(windows) {
+            assert_eq!(cmd.get_env("TERM_PROGRAM"), None);
+            assert_eq!(cmd.get_env("TERM_FEATURES"), None);
+        } else {
+            assert_eq!(
+                cmd.get_env("TERM_PROGRAM"),
+                Some(std::ffi::OsStr::new("ShiGuang"))
+            );
+            assert_eq!(
+                cmd.get_env("TERM_FEATURES"),
+                Some(std::ffi::OsStr::new("truecolor:clipboard:title:hyperlinks"))
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn shell_detection_resolves_files_without_executing_them() {
+        let directory =
+            std::env::temp_dir().join(format!("shiguang-shell-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        // Deliberately not runnable executables: detection must only resolve
+        // their paths and must not run profiles or wait for a help subprocess.
+        let legacy = directory.join("powershell.exe");
+        let modern = directory.join("pwsh.exe");
+        std::fs::write(&legacy, "not an executable").unwrap();
+        let fallback = TerminalSession::detect_windows_shell(directory.to_str().unwrap());
+        std::fs::write(&modern, "not an executable").unwrap();
+        let preferred = TerminalSession::detect_windows_shell(directory.to_str().unwrap());
+        std::fs::remove_file(&legacy).unwrap();
+        std::fs::remove_file(&modern).unwrap();
+        let missing = TerminalSession::detect_windows_shell(directory.to_str().unwrap());
+        std::fs::remove_dir(directory).unwrap();
+        assert_eq!(fallback.unwrap(), legacy);
+        assert_eq!(preferred.unwrap(), modern);
+        assert!(missing.is_err());
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn powershell_initialization_sets_utf8_for_console_and_native_pipelines() {
+        let path = crate::commands::setup_commands::user_shell_path();
+        let legacy = crate::coding_cli::resolve_program("powershell.exe", path).unwrap();
+        let modern = crate::coding_cli::resolve_program("pwsh.exe", path).ok();
+        for shell in std::iter::once(legacy).chain(modern) {
+            let mut builder = CommandBuilder::new(&shell);
+            TerminalSession::setup_powershell_prompt(&mut builder);
+            let init = builder.get_argv().last().unwrap().to_str().unwrap();
+            let mut command = tokio::process::Command::new(shell);
+            command
+                .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"])
+                .arg(format!(
+                    "{init}; \
+                 if ([Console]::InputEncoding.CodePage -ne 65001 -or \
+                     [Console]::OutputEncoding.CodePage -ne 65001 -or \
+                     $OutputEncoding.CodePage -ne 65001 -or \
+                     $OutputEncoding.GetPreamble().Length -ne 0) {{ exit 7 }}; \
+                 [Console]::WriteLine('中文 O''Brien [work]'); exit 0"
+                ));
+            let output = crate::commands::command_output_with_timeout(
+                &mut command,
+                std::time::Duration::from_secs(20),
+                None,
+            )
+            .await
+            .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(String::from_utf8(output.stdout)
+                .unwrap()
+                .lines()
+                .any(|line| line == "中文 O'Brien [work]"));
         }
     }
 }

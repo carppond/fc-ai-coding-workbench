@@ -63,6 +63,13 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Test frontend path contracts
+        run: npm run test:file-tree
+
+      - name: Test Rust platform behavior
+        working-directory: src-tauri
+        run: cargo test --locked
+
       - name: Build Tauri app
         shell: bash
         run: |

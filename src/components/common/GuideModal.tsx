@@ -43,10 +43,10 @@ export function GuideModal({ open, onClose }: GuideModalProps) {
 
           <section className="guide-section">
             <h2 className="guide-section__title">{t("cli.guide.models")}</h2>
-            <p>{t("cli.setupSubtitle")}</p>
+            <p>{t("cli.guide.modelSupport")}</p>
             <pre className="guide-pre">{"/login\n/model"}</pre>
             <p>{t("cli.guide.modelCommands")}</p>
-            <p>{t("cli.setupPreservation")}</p>
+            <p>{t("cli.guide.configuration")}</p>
           </section>
 
           <section className="guide-section">

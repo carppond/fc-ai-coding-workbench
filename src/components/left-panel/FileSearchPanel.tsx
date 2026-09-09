@@ -5,6 +5,7 @@ import { useFileStore } from "../../stores/fileStore";
 import { useI18n } from "../../lib/i18n";
 import * as ipc from "../../ipc/commands";
 import type { FileSearchResult } from "../../ipc/commands";
+import { joinProjectPath } from "../../lib/fileTreeGit";
 
 const DISPLAY_LIMIT = 50;
 
@@ -56,7 +57,7 @@ export function FileSearchPanel() {
 
   const handleResultClick = (result: FileSearchResult) => {
     if (!activeProject) return;
-    const absPath = activeProject.path + "/" + result.path;
+    const absPath = joinProjectPath(activeProject.path, result.path);
     openFile(absPath, result.line_number);
   };
 

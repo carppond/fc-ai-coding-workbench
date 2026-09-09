@@ -34,6 +34,9 @@ pub(super) async fn command_output_with_timeout(
     timeout: Duration,
     input: Option<&[u8]>,
 ) -> std::io::Result<std::process::Output> {
+    // Version probes and Git/print requests must not flash console windows.
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000);
     let mut child = command
         .stdin(if input.is_some() {
             Stdio::piped()

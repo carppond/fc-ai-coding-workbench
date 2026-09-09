@@ -9,7 +9,7 @@ import { useGitStore } from "./gitStore";
 /* ── 辅助：在条目树中递归查找节点 ── */
 function findNode(entries: DirEntry[], path: string): DirEntry | null {
   for (const e of entries) {
-    if (e.path === path) return e;
+    if (normalizePathKey(e.path) === normalizePathKey(path)) return e;
     if (e.children) {
       const found = findNode(e.children, path);
       if (found) return found;
@@ -25,7 +25,7 @@ function updateChildren(
   children: DirEntry[],
 ): DirEntry[] {
   return entries.map((e) => {
-    if (e.path === targetPath) {
+    if (normalizePathKey(e.path) === normalizePathKey(targetPath)) {
       return { ...e, children };
     }
     if (e.children && e.is_dir) {
@@ -251,7 +251,7 @@ export const useFileStore = create<FileState>((set, get) => ({
       const rootPath = findProjectRoot(Object.keys(trees), parentPath);
       if (!rootPath) return;
 
-      if (parentPath === rootPath) {
+      if (normalizePathKey(parentPath) === normalizePathKey(rootPath)) {
         // 刷新的是项目根
         set((s) => ({ trees: { ...s.trees, [rootPath]: children } }));
       } else {

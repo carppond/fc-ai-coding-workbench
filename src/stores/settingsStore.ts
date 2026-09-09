@@ -34,7 +34,6 @@ interface SettingsState {
   terminalScrollback: number;
   terminalLineHeight: number;
   terminalRenderer: TerminalRenderer;
-  onboardingComplete: boolean;
   loading: boolean;
   envCache: EnvCheckResult | null;
   envChecking: boolean;
@@ -60,7 +59,6 @@ interface SettingsState {
   setTerminalScrollback: (lines: number) => Promise<void>;
   setTerminalLineHeight: (height: number) => Promise<void>;
   setTerminalRenderer: (renderer: TerminalRenderer) => Promise<void>;
-  setOnboardingComplete: (complete: boolean) => Promise<void>;
   saveProviders: (providers: ProviderConfig[]) => Promise<void>;
   hasApiKey: (provider: string) => Promise<boolean>;
   setApiKey: (provider: string, key: string) => Promise<void>;
@@ -93,7 +91,6 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   terminalScrollback: 5000,
   terminalLineHeight: 1.35,
   terminalRenderer: "dom",
-  onboardingComplete: false,
   loading: true,
   envCache: null,
   envChecking: false,
@@ -185,13 +182,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   loadSettings: async () => {
     set({ loading: true });
     try {
-      const [providersVal, providerVal, modelVal, modeVal, themeVal, onboardingVal, editorFsVal, terminalFsVal, chatFsVal, scrollbackVal, lineHeightVal, rendererVal, codingCliVal, approvalModeVal] = await Promise.all([
+      const [providersVal, providerVal, modelVal, modeVal, themeVal, editorFsVal, terminalFsVal, chatFsVal, scrollbackVal, lineHeightVal, rendererVal, codingCliVal, approvalModeVal] = await Promise.all([
         ipc.getSetting("providers"),
         ipc.getSetting("active_provider"),
         ipc.getSetting("active_model"),
         ipc.getSetting("active_mode"),
         ipc.getSetting("theme"),
-        ipc.getSetting("onboarding_complete"),
         ipc.getSetting("editor_font_size"),
         ipc.getSetting("terminal_font_size"),
         ipc.getSetting("chat_font_size"),
@@ -234,7 +230,6 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         terminalScrollback,
         terminalLineHeight,
         terminalRenderer,
-        onboardingComplete: (onboardingVal as boolean) || false,
         loading: false,
       });
     } catch {
@@ -316,11 +311,6 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setTerminalRenderer: async (renderer) => {
     set({ terminalRenderer: renderer });
     await ipc.setSetting("terminal_renderer", renderer);
-  },
-
-  setOnboardingComplete: async (complete) => {
-    set({ onboardingComplete: complete });
-    await ipc.setSetting("onboarding_complete", complete);
   },
 
   saveProviders: async (providers) => {

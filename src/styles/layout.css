@@ -10,6 +10,47 @@
 }
 
 /* ========================================
+   Empty Workspace
+   ======================================== */
+.workspace-start {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  gap: 16px;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.workspace-start__copy {
+  flex: 1;
+  min-width: 240px;
+}
+
+.workspace-start__title {
+  margin: 0 0 6px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.workspace-start__description,
+.workspace-start__note {
+  margin: 0;
+  line-height: 1.6;
+  font-size: 12px;
+}
+
+.workspace-start__description {
+  color: var(--text-secondary);
+}
+
+.workspace-start__note {
+  color: var(--text-muted);
+}
+
+/* ========================================
    TopBar
    ======================================== */
 .top-bar {
@@ -1836,102 +1877,6 @@
 }
 
 /* ========================================
-   Onboarding Wizard
-   ======================================== */
-.wizard {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  padding: 40px;
-  background: var(--bg-primary);
-  background-image: radial-gradient(ellipse at top, var(--accent-dim) 0%, transparent 60%);
-}
-
-.wizard__card {
-  width: 100%;
-  max-width: 500px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 36px;
-  box-shadow: var(--shadow-lg);
-}
-
-.wizard__title {
-  font-size: 22px;
-  font-weight: 700;
-  margin-bottom: 8px;
-  color: var(--text-primary);
-  letter-spacing: -0.3px;
-}
-
-.wizard__subtitle {
-  font-size: 14px;
-  color: var(--text-secondary);
-  margin-bottom: 28px;
-  line-height: 1.6;
-}
-
-.wizard__field {
-  margin-bottom: 18px;
-}
-
-.wizard__label {
-  display: block;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  margin-bottom: 8px;
-  text-transform: capitalize;
-  letter-spacing: 0.5px;
-}
-
-.wizard__input {
-  width: 100%;
-  padding: 10px 14px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  color: var(--text-primary);
-  font-size: 14px;
-  transition: border-color var(--transition-fast);
-}
-
-.wizard__input:focus {
-  border-color: var(--accent);
-  background: var(--bg-hover);
-}
-
-.wizard__actions {
-  display: flex;
-  gap: 10px;
-  justify-content: flex-end;
-  margin-top: 28px;
-}
-
-.wizard__steps {
-  display: flex;
-  gap: 8px;
-  justify-content: center;
-  margin-bottom: 28px;
-}
-
-.wizard__step-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--bg-hover);
-  transition: background var(--transition-normal);
-}
-
-.wizard__step-dot--active {
-  background: var(--accent);
-  box-shadow: 0 0 6px var(--accent-dim);
-}
-
-/* ========================================
    Environment Setup
    ======================================== */
 .env-setup {
@@ -2089,6 +2034,13 @@
 .env-log__line {
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+.tool-setup__hint {
+  margin: 0 0 16px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 /* ========================================
@@ -2578,6 +2530,10 @@
 }
 
 .cli-launcher__hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
   flex-basis: 100%;
   color: var(--warning);
   font-size: 11px;

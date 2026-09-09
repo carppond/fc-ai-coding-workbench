@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useFileStore } from "../../stores/fileStore";
 import { useI18n } from "../../lib/i18n";
+import { fileNameFromPath } from "../../lib/fileTreeGit";
 
 import { EditorState, type Extension, type Text } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, dropCursor, rectangularSelection, crosshairCursor } from "@codemirror/view";
@@ -273,7 +274,7 @@ export function FileViewer() {
         <div className="file-viewer__image-container">
           <img
             src={convertFileSrc(openFilePath)}
-            alt={openFilePath.split("/").pop() || ""}
+            alt={fileNameFromPath(openFilePath)}
             className="file-viewer__image"
           />
         </div>

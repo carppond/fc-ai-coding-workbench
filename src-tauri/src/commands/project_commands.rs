@@ -196,6 +196,16 @@ pub struct FileSearchResult {
     pub line_content: String,
 }
 
+/// Search and quick-open share slash-separated relative paths on the IPC boundary.
+/// Do not replace backslashes on Unix, where they are valid filename characters.
+fn relative_file_path(path: &Path, root: &Path) -> Option<String> {
+    let relative = path.strip_prefix(root).ok()?.to_string_lossy();
+    #[cfg(windows)]
+    return Some(relative.replace('\\', "/"));
+    #[cfg(not(windows))]
+    Some(relative.into_owned())
+}
+
 #[tauri::command]
 pub async fn search_in_files(
     project_path: String,
@@ -216,7 +226,7 @@ pub async fn search_in_files(
             query_lower: &str,
             results: &mut Vec<FileSearchResult>,
             max: usize,
-            project_path: &str,
+            project_path: &Path,
         ) {
             let read_dir = match std::fs::read_dir(dir) {
                 Ok(rd) => rd,
@@ -247,6 +257,9 @@ pub async fn search_in_files(
                         Ok(c) => c,
                         Err(_) => continue,
                     };
+                    let Some(rel_path) = relative_file_path(&path, project_path) else {
+                        continue;
+                    };
                     let mut file_matches = 0;
                     for (i, line) in content.lines().enumerate() {
                         if results.len() >= max {
@@ -256,14 +269,8 @@ pub async fn search_in_files(
                             break;
                         }
                         if line.to_lowercase().contains(query_lower) {
-                            let rel_path = path
-                                .to_string_lossy()
-                                .strip_prefix(project_path)
-                                .unwrap_or(&path.to_string_lossy())
-                                .trim_start_matches('/')
-                                .to_string();
                             results.push(FileSearchResult {
-                                path: rel_path,
+                                path: rel_path.clone(),
                                 line_number: i + 1,
                                 line_content: line.chars().take(200).collect(),
                             });
@@ -279,7 +286,7 @@ pub async fn search_in_files(
             &query_lower,
             &mut results,
             max,
-            &project_path,
+            Path::new(&project_path),
         );
         Ok(results)
     })
@@ -393,8 +400,8 @@ pub async fn list_all_files(
                 let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
                 if is_dir {
                     walk(&path, root, files, depth + 1, max_depth);
-                } else if let Ok(rel) = path.strip_prefix(root) {
-                    files.push(rel.to_string_lossy().to_string());
+                } else if let Some(relative) = relative_file_path(&path, root) {
+                    files.push(relative);
                 }
             }
         }
@@ -439,4 +446,48 @@ pub async fn read_file_content(
         Ok(tauri::ipc::Response::new(content))
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn search_and_quick_open_return_reopenable_relative_paths() {
+        struct TempProject(std::path::PathBuf);
+        impl Drop for TempProject {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let project = TempProject(
+            std::env::temp_dir().join(format!("shiguang-search-{}", uuid::Uuid::new_v4())),
+        );
+        std::fs::create_dir_all(project.0.join("nested dir")).unwrap();
+        // Unix backslashes are filename characters; Windows separators must
+        // still become '/' in both IPC responses.
+        #[cfg(windows)]
+        let filename = "file.txt";
+        #[cfg(not(windows))]
+        let filename = "file\\name.txt";
+        let relative = format!("nested dir/{filename}");
+        std::fs::write(project.0.join("nested dir").join(filename), "needle\n").unwrap();
+        let root = std::fs::canonicalize(&project.0).unwrap();
+        let project_path = format!("{}{}", root.display(), std::path::MAIN_SEPARATOR);
+
+        let matches = search_in_files(project_path.clone(), "needle".into(), None)
+            .await
+            .unwrap();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].path, relative);
+        assert_eq!(matches[0].line_number, 1);
+        assert_eq!(
+            std::fs::read_to_string(root.join(&matches[0].path)).unwrap(),
+            "needle\n"
+        );
+        assert_eq!(
+            list_all_files(project_path, None).await.unwrap(),
+            vec![relative]
+        );
+    }
 }

@@ -1,19 +1,19 @@
 import { useEffect, useState, useCallback } from "react";
+import { FolderOpen } from "lucide-react";
 import { Allotment } from "allotment";
 import "allotment/dist/style.css";
 import { TopBar } from "./TopBar";
 import { LeftPanel } from "../left-panel/LeftPanel";
 import { CenterPanel } from "../center-panel/CenterPanel";
 import { RightPanel } from "../right-panel/RightPanel";
-import { SetupWizard } from "../onboarding/SetupWizard";
 import { QuickOpen } from "../common/QuickOpen";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useI18n } from "../../lib/i18n";
 
 export function AppShell() {
-  const { onboardingComplete, loadSettings, loading, preloadEnvCheck } = useSettingsStore();
-  const { loadProjects } = useProjectStore();
+  const { loadSettings, loading, preloadEnvCheck } = useSettingsStore();
+  const { loadProjects, openProject, activeProject, loading: projectsLoading } = useProjectStore();
   const { t, loadLocale } = useI18n();
   const [quickOpenVisible, setQuickOpenVisible] = useState(false);
 
@@ -60,13 +60,22 @@ export function AppShell() {
     );
   }
 
-  if (!onboardingComplete) {
-    return <SetupWizard />;
-  }
-
   return (
     <div className="app-shell">
       <TopBar />
+      {!projectsLoading && !activeProject && (
+        <section className="workspace-start" aria-labelledby="workspace-start-title">
+          <div className="workspace-start__copy">
+            <h1 className="workspace-start__title" id="workspace-start-title">{t("workspace.startTitle")}</h1>
+            <p className="workspace-start__description">{t("workspace.startHint")}</p>
+            <p className="workspace-start__note">{t("workspace.startNote")}</p>
+          </div>
+          <button className="btn btn--primary" onClick={openProject}>
+            <FolderOpen size={16} />
+            {t("topbar.openProject")}
+          </button>
+        </section>
+      )}
       <div className="app-shell__content">
         <Allotment
           onDragStart={() => {

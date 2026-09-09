@@ -6,6 +6,15 @@ import { useSettingsStore } from "../../stores/settingsStore";
 import { useI18n } from "../../lib/i18n";
 import { CODING_CLI_IDS, CODING_CLI_INFO, type CodingCli } from "../../lib/codingCli";
 
+export type EnvironmentTool = "git" | CodingCli;
+
+const ENVIRONMENT_CARDS: Record<EnvironmentTool | "all", readonly string[]> = {
+  git: ["git"],
+  omp: ["omp"],
+  pi: ["node", "pi"],
+  all: ["git", "node", "omp", "pi"],
+};
+
 type OmpInstallMethod = "native" | "bun" | "brew";
 const OMP_INSTALL_METHODS: Record<OmpInstallMethod, string> = {
   native: "cli.installNative",
@@ -25,18 +34,19 @@ function versionAtLeast(version: string | null, minimum: readonly number[]): boo
 
 interface EnvironmentSetupProps {
   compact?: boolean;
+  tool?: EnvironmentTool;
 }
 
-function SkeletonCards() {
+function SkeletonCards({ compact = false, tool }: EnvironmentSetupProps) {
   const { t } = useI18n();
   return (
-    <div className="env-setup">
+    <div className={`env-setup ${compact ? "env-setup--compact" : ""}`}>
       <div className="env-setup__detecting">
         <Loader size={20} className="env-setup__spinner" />
         <span>{t("env.detecting")}</span>
       </div>
-      {["git", "node", "omp", "pi"].map((tool) => (
-        <div className="env-card env-card--skeleton" key={tool}>
+      {ENVIRONMENT_CARDS[tool ?? "all"].map((card) => (
+        <div className="env-card env-card--skeleton" key={card}>
           <div className="env-card__header">
             <div className="env-card__status">
               <div className="env-skeleton env-skeleton--icon" />
@@ -50,7 +60,7 @@ function SkeletonCards() {
   );
 }
 
-export function EnvironmentSetup({ compact = false }: EnvironmentSetupProps) {
+export function EnvironmentSetup({ compact = false, tool }: EnvironmentSetupProps) {
   const { t } = useI18n();
   const env = useSettingsStore((s) => s.envCache);
   const loading = useSettingsStore((s) => s.envChecking);
@@ -149,12 +159,12 @@ export function EnvironmentSetup({ compact = false }: EnvironmentSetupProps) {
   };
 
   if (!env && (loading || !envError)) {
-    return <SkeletonCards />;
+    return <SkeletonCards compact={compact} tool={tool} />;
   }
 
   if (!env) {
     return (
-      <div className="env-setup">
+      <div className={`env-setup ${compact ? "env-setup--compact" : ""}`}>
         <div className="env-card__detail">{envError}</div>
         <button className="btn btn--sm btn--ghost" onClick={detect}>
           <RefreshCw size={14} /> {t("env.detectRefresh")}
@@ -172,6 +182,7 @@ export function EnvironmentSetup({ compact = false }: EnvironmentSetupProps) {
   return (
     <div className={`env-setup ${compact ? "env-setup--compact" : ""}`}>
       {/* Git Card */}
+      {(!tool || tool === "git") && (
       <div className={`env-card env-card--fade-in ${gitReady ? "env-card--ok" : "env-card--missing"}`}>
         <div className="env-card__header">
           <div className="env-card__status">
@@ -218,17 +229,19 @@ export function EnvironmentSetup({ compact = false }: EnvironmentSetupProps) {
           </div>
         )}
       </div>
+      )}
 
       {/* Node.js Card */}
-      <div className={`env-card env-card--fade-in ${nodeReady ? "env-card--ok" : "env-card--missing"}`} style={{ animationDelay: "0.05s" }}>
+      {(!tool || tool === "pi") && (
+      <div className={`env-card env-card--fade-in ${piRuntimeReady ? "env-card--ok" : "env-card--missing"}`} style={{ animationDelay: "0.05s" }}>
         <div className="env-card__header">
           <div className="env-card__status">
-            {nodeReady ? (
+            {piRuntimeReady ? (
               <CheckCircle size={18} className="env-card__icon env-card__icon--ok" />
             ) : (
               <XCircle size={18} className="env-card__icon env-card__icon--missing" />
             )}
-            <span className="env-card__name">Node.js</span>
+            <span className="env-card__name">Node.js / npm</span>
           </div>
           {nodeReady && env.node_version && (
             <span className="env-card__version">{env.node_version}</span>
@@ -257,13 +270,15 @@ export function EnvironmentSetup({ compact = false }: EnvironmentSetupProps) {
           </div>
         )}
 
-        {nodeReady && env.npm_version && (
+        {env.npm_installed && env.npm_version && (
           <div className="env-card__detail">npm {env.npm_version}</div>
         )}
         {!piRuntimeReady && <div className="env-card__detail">{t("cli.piRuntimeRequired")}</div>}
       </div>
+      )}
 
       {CODING_CLI_IDS.map((cli, index) => {
+        if (tool && tool !== cli) return null;
         const status = env.clis[cli];
         const method = cli === "omp" ? ompMethod : "npm";
         const canInstall = cli === "pi" ? piRuntimeReady
@@ -301,7 +316,7 @@ export function EnvironmentSetup({ compact = false }: EnvironmentSetupProps) {
                     ) : null
                   ))}
                 </div>
-                <div className="env-card__detail">{t("cli.ompNativeHint")}</div>
+                {ompMethod === "native" && <div className="env-card__detail">{t("cli.ompNativeHint")}</div>}
                 {ompMethod === "bun" && (
                   <div className="env-card__detail">
                     {t("cli.bunRuntimeRequired")}{env.bun_version ? ` (${env.bun_version})` : ""}
@@ -372,5 +387,3 @@ export function EnvironmentSetup({ compact = false }: EnvironmentSetupProps) {
     </div>
   );
 }
-
-EnvironmentSetup.Skeleton = SkeletonCards;

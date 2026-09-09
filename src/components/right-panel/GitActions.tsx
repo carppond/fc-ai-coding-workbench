@@ -1,10 +1,13 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2, Sparkles, Archive, XCircle, AlertTriangle } from "lucide-react";
 import { useGitStore } from "../../stores/gitStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useI18n } from "../../lib/i18n";
 import { useToast } from "../common/Toast";
 import { useConfirm } from "../common/ConfirmDialog";
+import { useSettingsStore } from "../../stores/settingsStore";
+import { ToolSetupDialog } from "../common/ToolSetupDialog";
+import type { EnvironmentTool } from "../common/EnvironmentSetup";
 
 export function GitActions() {
   const commitMessage = useGitStore((s) => s.commitMessage);
@@ -26,6 +29,29 @@ export function GitActions() {
   const { toast } = useToast();
   const { confirm } = useConfirm();
   const prevErrorRef = useRef<string | null>(null);
+  const [setupTool, setSetupTool] = useState<EnvironmentTool | null>(null);
+  const [checkingTool, setCheckingTool] = useState(false);
+  const checkingToolRef = useRef(false);
+
+  // Local Git operations use libgit2. Only remote operations need Git CLI;
+  // AI text generation needs the selected coding CLI, not every environment tool.
+  const requireTool = async (tool: EnvironmentTool): Promise<boolean> => {
+    if (checkingToolRef.current) return false;
+    checkingToolRef.current = true;
+    setCheckingTool(true);
+    try {
+      await useSettingsStore.getState().loadEnvironment();
+      if (useProjectStore.getState().getGitEffectivePath() !== gitPath) return false;
+      const { envCache, codingCli } = useSettingsStore.getState();
+      if (tool !== "git" && codingCli !== tool) return false;
+      const available = tool === "git" ? envCache?.git_installed : envCache?.clis[tool].installed;
+      if (!available) setSetupTool(tool);
+      return available === true;
+    } finally {
+      checkingToolRef.current = false;
+      setCheckingTool(false);
+    }
+  };
 
   const hasStagedFiles = fileStatuses.some((f) => f.staged);
   const conflictCount = fileStatuses.filter((f) => f.status === "conflicted").length;
@@ -48,6 +74,7 @@ export function GitActions() {
       extraLabel: t("git.commitOnly"),
     });
     if (!result) return;
+    if (result === true && !(await requireTool("git"))) return;
     const ok = await commit(gitPath);
     if (!ok) return;
     toast(t("git.commitSuccess"), "success");
@@ -61,6 +88,7 @@ export function GitActions() {
 
   const handlePull = async () => {
     if (!gitPath) return;
+    if (!(await requireTool("git"))) return;
     const msg = hasUncommitted
       ? t("git.pullConfirmDirty")
       : t("git.pullConfirm");
@@ -71,6 +99,7 @@ export function GitActions() {
 
   const handleGenerate = async () => {
     if (!gitPath || !hasStagedFiles) return;
+    if (!(await requireTool(useSettingsStore.getState().codingCli))) return;
     const ok = await genCommitMsg(gitPath);
     if (!ok) {
       toast(t("git.noStagedForAI"), "error");
@@ -91,6 +120,7 @@ export function GitActions() {
 
   const handlePush = async () => {
     if (!gitPath) return;
+    if (!(await requireTool("git"))) return;
     const msg = hasUncommitted
       ? t("git.pushConfirmDirty")
       : t("git.pushConfirm");
@@ -116,7 +146,7 @@ export function GitActions() {
           <button
             className="btn btn--ghost btn--sm"
             onClick={handleMergeAbort}
-            disabled={operating}
+            disabled={operating || checkingTool}
             style={{ marginLeft: "auto", fontSize: 11, color: "var(--error)" }}
           >
             <XCircle size={12} />
@@ -141,7 +171,7 @@ export function GitActions() {
         <button
           className="git-actions__ai-btn"
           onClick={handleGenerate}
-          disabled={!hasStagedFiles || generating || operating}
+          disabled={!hasStagedFiles || generating || operating || checkingTool}
           title={t("git.generateCommit")}
         >
           {generating ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />}
@@ -151,7 +181,7 @@ export function GitActions() {
         <button
           className="btn btn--primary btn--sm"
           onClick={handleCommit}
-          disabled={!commitMessage.trim() || !hasStagedFiles || operating}
+          disabled={!commitMessage.trim() || !hasStagedFiles || operating || checkingTool}
         >
           {operationType === "commit" ? <Loader2 size={13} className="spin" /> : null}
           {t("git.commit")}
@@ -159,7 +189,7 @@ export function GitActions() {
         <button
           className="btn btn--ghost btn--sm"
           onClick={handlePull}
-          disabled={operating}
+          disabled={operating || checkingTool}
         >
           {operationType === "pull" ? <Loader2 size={13} className="spin" /> : null}
           {t("git.pull")}
@@ -167,7 +197,7 @@ export function GitActions() {
         <button
           className="btn btn--ghost btn--sm"
           onClick={handlePush}
-          disabled={operating}
+          disabled={operating || checkingTool}
         >
           {operationType === "push" ? <Loader2 size={13} className="spin" /> : null}
           {t("git.push")}
@@ -175,13 +205,14 @@ export function GitActions() {
         <button
           className="btn btn--ghost btn--sm"
           onClick={handleStash}
-          disabled={operating || !hasUncommitted}
+          disabled={operating || checkingTool || !hasUncommitted}
           title={t("git.stashSave")}
         >
           <Archive size={13} />
           {t("git.stashSave")}
         </button>
       </div>
+      {setupTool && <ToolSetupDialog tool={setupTool} onClose={() => setSetupTool(null)} />}
     </div>
   );
 }

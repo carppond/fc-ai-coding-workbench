@@ -1,6 +1,7 @@
 use super::run_blocking;
 use crate::coding_cli::{
-    build_launch_command, resolve_executable, CliLaunchAction, CodingCli, OmpApprovalMode,
+    build_launch_command, quote_path, resolve_executable, CliLaunchAction, CodingCli,
+    OmpApprovalMode,
 };
 use crate::errors::{AppError, AppResult};
 use crate::terminal::TerminalSession;
@@ -252,7 +253,7 @@ pub fn terminal_cd(state: State<TerminalState>, session_id: String, path: String
         .lock()
         .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
     if let Some(session) = sessions.get(&session_id) {
-        let cmd = build_cd_command(&session.shell_name, &path);
+        let cmd = build_cd_command(&session.shell_name, &path)?;
         session.write(&cmd).map_err(|e| AppError::General(e))?;
     }
     Ok(())
@@ -376,30 +377,138 @@ pub fn acknowledge_terminal_output(
 }
 
 /// Build a cd + clear command appropriate for the given shell.
-fn build_cd_command(shell_name: &str, path: &str) -> String {
-    match shell_name {
+fn build_cd_command(shell_name: &str, path: &str) -> AppResult<String> {
+    let quoted = quote_path(Path::new(path), shell_name)?;
+    let shell = shell_name
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(shell_name)
+        .to_ascii_lowercase();
+    Ok(match shell.as_str() {
         "cmd" | "cmd.exe" => {
-            // cmd.exe: cd /d "path" & cls
-            format!("cd /d \"{}\" & cls\n", path.replace('"', ""))
+            // cmd cannot use a UNC working directory. pushd temporarily maps
+            // the share to a drive; local paths use /d to switch drives too.
+            // quote_path rejects expansion characters rather than changing
+            // the target or changing the user's delayed-expansion settings.
+            if path.starts_with("\\\\") || path.starts_with("//") {
+                format!("pushd {quoted} && cls\r")
+            } else {
+                format!("cd /d {quoted} && cls\r")
+            }
         }
         "pwsh" | "pwsh.exe" | "powershell" | "powershell.exe" => {
-            // PowerShell: Set-Location then Clear-Host
-            let escaped = path.replace('\'', "''");
-            format!(" Set-Location '{}'; Clear-Host\n", escaped)
+            // -Path interprets brackets as wildcards, even inside quotes.
+            format!(" Set-Location -LiteralPath {quoted}; if ($?) {{ Clear-Host }}\r")
         }
         _ => {
-            // Unix shells (zsh, bash, fish, sh)
-            // Leading space prevents shell history entry
-            let escaped = format!("'{}'", path.replace('\'', "'\\''"));
-            format!(" cd {} && clear\n", escaped)
+            // Leading space prevents a shell history entry.
+            format!(" cd -- {quoted} && clear\r")
         }
-    }
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[test]
+    fn cd_rejects_terminal_controls_and_cmd_expansion_instead_of_changing_the_path() {
+        for path in ["C:\\%USERPROFILE%", "C:\\literal!name", "C:\\a\"b"] {
+            assert!(build_cd_command("cmd.exe", path).is_err(), "{path:?}");
+        }
+        for shell in ["cmd.exe", "powershell.exe", "pwsh.exe", "bash", "fish"] {
+            for path in ["C:\\work\rcalc", "C:\\work\ncalc", "C:\\work\u{1b}[2J"] {
+                assert!(build_cd_command(shell, path).is_err(), "{shell}: {path:?}");
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn powershell_cd_uses_literal_paths_and_keeps_location_errors_visible() {
+        let directory = std::env::temp_dir().join(format!("shiguang-cd-{}", uuid::Uuid::new_v4()));
+        let target = directory.join("中文 O'Brien [work] & space");
+        let wildcard_match = directory.join("中文 O'Brien w & space");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::create_dir(&wildcard_match).unwrap();
+        let missing = directory.join("missing");
+        let path = crate::commands::setup_commands::user_shell_path();
+        let legacy = crate::coding_cli::resolve_program("powershell.exe", path).unwrap();
+        let modern = crate::coding_cli::resolve_program("pwsh.exe", path).ok();
+        for shell in std::iter::once(legacy).chain(modern) {
+            let shell_name = shell.file_name().unwrap().to_str().unwrap();
+            let cd = build_cd_command(shell_name, target.to_str().unwrap()).unwrap();
+            let bad_cd = build_cd_command(shell_name, missing.to_str().unwrap()).unwrap();
+            let mut command = tokio::process::Command::new(&shell);
+            command
+                .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"])
+                .arg(format!(
+                    "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); \
+                 function Clear-Host {{}}; \
+                 {cd}; [Console]::WriteLine((Get-Location).Path); \
+                 function Clear-Host {{ [Console]::WriteLine('UNEXPECTED_CLEAR') }}; \
+                 {bad_cd}; exit 0"
+                ));
+            let result = crate::commands::command_output_with_timeout(
+                &mut command,
+                std::time::Duration::from_secs(20),
+                None,
+            )
+            .await;
+            let output = result.unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            assert!(
+                stdout.lines().any(|line| line == target.to_str().unwrap()),
+                "{stdout}"
+            );
+            assert!(!stdout.contains("UNEXPECTED_CLEAR"), "{stdout}");
+            assert!(String::from_utf8_lossy(&output.stderr).contains("missing"));
+        }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn cmd_cd_preserves_quoted_directory_characters() {
+        let directory =
+            std::env::temp_dir().join(format!("shiguang-cmd-cd-{}", uuid::Uuid::new_v4()));
+        let target = directory.join("中文 O'Brien [work] & space");
+        std::fs::create_dir_all(&target).unwrap();
+        let cd = build_cd_command("cmd.exe", target.to_str().unwrap()).unwrap();
+        let shell = crate::coding_cli::resolve_program(
+            "cmd.exe",
+            crate::commands::setup_commands::user_shell_path(),
+        )
+        .unwrap();
+        let mut command = tokio::process::Command::new(shell);
+        command.args(["/D", "/Q", "/V:ON", "/C"]).arg(format!(
+            "chcp 65001 >nul & {} & cd",
+            cd.trim_end_matches('\r')
+        ));
+        let result = crate::commands::command_output_with_timeout(
+            &mut command,
+            std::time::Duration::from_secs(20),
+            None,
+        )
+        .await;
+        std::fs::remove_dir_all(directory).unwrap();
+        let output = result.unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        assert!(
+            stdout.lines().any(|line| line == target.to_str().unwrap()),
+            "{stdout}"
+        );
+    }
     #[test]
     fn cli_detection_matches_entrypoints_not_prompt_arguments_or_name_substrings() {
         let directory =

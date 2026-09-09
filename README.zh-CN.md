@@ -2,31 +2,48 @@
 
 # 拾光 AI 编程平台
 
-一款集成 AI 对话、Git 工作流和终端的桌面编程辅助工具，基于 Tauri 2 构建，支持 macOS、Windows 和 Linux。
+一款集成 Git 工作流、终端和 AI 服务商接口的桌面 AI 编程工作台，基于 Tauri 2 构建，支持 macOS、Windows 和 Linux。可使用 OMP、Pi 等编程客户端，按所选 CLI 的服务商与账户配置选择 Claude、GPT 等模型。
 
 ## 功能特性
 
-- **AI 对话（开发中）** — 保留 Anthropic Claude、OpenAI 服务商接口；终端 AI 编程使用 OMP 或 Pi
+- **AI 对话（开发中）** — 保留 Anthropic／Claude、OpenAI／GPT 服务商接口，与终端 CLI 的登录及模型配置相互独立
 - **Git 集成** — 文件级暂存/撤销、提交、推送/拉取、分支追踪、提交日志、差异预览
 - **内置终端** — 多 Tab 终端，支持 zsh/bash/fish/PowerShell、自定义 prompt 和快捷键；通过有界流控保持隐藏标签中的 ANSI 输出顺序
 - **文件管理** — 项目文件树浏览、搜索、新建/重命名/删除；按仓库显示 Git 改动标记，未保存的编辑单独显示圆点
 - **文件编辑** — CodeMirror 编辑器按文档快照判断保存状态，保留撤销历史；大文件使用轻量模式，仍支持编辑、搜索、撤销和保存
-- **环境检测** — 本地工具检测与后台更新检查分离，共享检测请求，并为子进程设置执行期限
+- **按需环境配置** — 启动直接进入工作台，需要时检查／安装相关工具；本地检测与后台更新检查分离，共享请求，并为子进程设置执行期限
 - **网络代理** — 支持 HTTP/HTTPS/SOCKS5 代理，一键应用到 Git、npm、终端及 API 请求
 - **编程 CLI 会话** — 默认 OMP、记住 CLI 选择，提供新会话／继续上次／选择会话三个动作，按 CLI 能力展示审批设置
-- **多主题** — 内置 14 款主题（Catppuccin Mocha/Latte、Dracula、Nord、Tokyo Night 等）
+- **多主题** — 内置 Catppuccin Mocha/Latte、Dracula、Nord、Tokyo Night 等主题，可从顶栏切换
 - **双语界面** — 中文 / English 一键切换
 - **安全存储** — 应用内服务商 API 密钥仍使用系统钥匙串；OMP、Pi 各自管理登录和模型配置
 
+## 进入工作台
+
+- 启动保留轻量加载占位，随后直接进入工作台，不再经过设置向导，也不依赖引导完成标记。
+- 未打开项目时，通过 **打开项目** 选择文件夹；也可以先使用终端。首次打开项目后，终端会进入该项目目录。
+- 当前 CLI 不可用时，终端操作旁提供 **检查／安装 OMP／Pi**。弹层只显示该 CLI 及其安装依赖：OMP 原生安装无需 Node.js、npm 或 Bun，Pi 的 npm 渠道需要 Node.js／npm。
+- 拉取／推送、AI 提交说明生成只检查各自需要的工具。缺少 Git 命令行不会阻断基于 libgit2 的本地操作，“仅提交”与“提交并推送”分别处理。
+- 设置中仍保留完整环境管理；已有服务商／模型、CLI 选择、审批策略、主题字号、凭据与历史保持不变。
+
 ## 编程 CLI 工作流
 
-- 在终端工具栏或设置中选择 OMP／Pi，选择会持久保存，与 AI 服务商和模型设置相互独立；Claude 模型仍可使用。
+- 在终端工具栏或设置中选择 OMP／Pi。它们是编程客户端，不是模型；在所选 CLI 中配置 Claude、GPT 或其他受支持模型，其登录／模型配置与应用内 AI 服务商和模型设置相互独立。
 - 三个动作沿用当前终端窗格的工作目录。终端忙碌或无法确认就绪时拒绝启动，不向运行中的 TUI 注入命令。
 - **新会话**始终新建。OMP 本次启动会读取仅含 `autoResume: false` 的临时配置，避免全局自动续接改变按钮语义，不改写用户配置。
 - **继续上次**使用 `--continue`；**选择会话**打开各 CLI 自带的 `--resume` 选择器。两款 CLI 分别管理自己的历史。
 - OMP 提供“跟随配置”“逐次确认”“自动批准全部工具”；最后一项包含命令执行，需要明确确认。Pi 不显示同名审批开关，其 `--approve` 是项目信任，不是逐工具审批。
 - Git 提交说明由所选 CLI 以不保存会话、禁用工具的打印模式生成，仅返回文字，不执行 `omp commit` 或创建提交。
-- 已有 Claude Code 文件、shell 配置、密钥和历史均保留；应用不再提供旧的恢复命令捕获钩子和命令安装器。
+- 已有编程客户端文件、shell 配置、凭据和历史均保留；切换客户端不会转换或删除其他客户端的配置与历史。
+
+### Windows 终端与路径
+
+- 优先使用 PowerShell 7，其次为 Windows PowerShell，最后回退到 CMD。探测 shell 时不执行配置文件；交互式 PowerShell 按标准机制加载配置一次，使用 UTF-8 输入／输出。应用不修改执行策略。
+- Windows／Linux 终端使用 **Ctrl+Shift+F/K/W** 搜索、清屏、关闭，**Ctrl+Shift+C/V** 复制／粘贴；仍支持 Ctrl+V 和右键粘贴。Ctrl+W/F/P 留给 CLI 的编辑／模型快捷键，无选区时 Ctrl+C 中断程序。macOS 保留 Command 快捷键；文件编辑器仍使用 Ctrl+W 关闭。
+- 多行粘贴跟随前台程序的括号粘贴模式，包括 PowerShell 中运行的 CLI，不再根据父 shell 名称猜测。
+- Windows 盘符、UNC 和 `\\?\` 路径在打开／保存文件时保留原始写法，仅在项目与 Git 归属比较时统一大小写和分隔符。CMD 使用 `cd /d` 切换盘符，UNC 共享使用 `pushd`；无法安全引用的 CMD 路径会被拒绝，请改用 PowerShell。
+- 工具检测与终端 PATH 包含 OMP／npm／Bun、Node.js、Git 和 PowerShell 的常见安装目录。修改自定义 PATH 目录后请重启应用。
+- 应用内 API 密钥使用 **Windows 凭据管理器**。旧 Windows 版本若出现保存后丢失密钥的情况，请在更新后重新保存一次；OMP／Pi 自身的登录不受影响。
 
 ## 截图
 
@@ -48,12 +65,12 @@
 | Git | libgit2 (git2-rs) |
 | 终端 | portable-pty + xterm.js |
 | HTTP | reqwest (支持 SOCKS5) |
-| 密钥存储 | keyring (macOS Keychain / Linux Secret Service) |
+| 密钥存储 | keyring (macOS Keychain / Windows 凭据管理器 / Linux Secret Service) |
 
 ## 环境要求
 
 - **Node.js** >= 18
-- **Rust** >= 1.70
+- **Rust** — 当前稳定版工具链
 - **系统依赖**
   - macOS: Xcode Command Line Tools
   - Windows: [WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/)、Visual Studio Build Tools
@@ -131,19 +148,21 @@ chmod +x build-dmg.sh
 - **手动触发** — Actions → `Build & Release` → `Run workflow`
 - **Tag 触发** — 推送 `v*` 标签自动构建并创建 GitHub Release
 
+各平台打包前执行 `npm run test:file-tree` 和 `cargo test --locked`。Windows 专用测试覆盖 shell／脚本执行、目录字面路径切换和凭据持久化；在 macOS／Linux 上运行测试不会执行这些 Windows 用例。旧版 Windows 的 ConPTY 关闭、真实 UNC 共享访问仍需 Windows 运行环境验证。
+
 构建产物：
 
 | 平台 | 格式 |
 |------|------|
 | macOS | `.dmg` (Universal Binary) |
-| Windows | `.msi` + `.exe` |
+| Windows | `.exe` (NSIS) |
 | Linux | `.deb` + `.AppImage` |
 
 ## 注意事项
 
 1. **API 密钥安全** — 应用内服务商密钥仍存储在系统钥匙串。OMP／Pi 自行管理登录和模型设置，应用不复制密钥或写入 shell API 环境变量。
 2. **代理设置** — 设置面板中的代理配置会持久化到数据库，重启应用后自动恢复
-3. **终端环境** — 内置终端会继承系统 shell 环境并自定义 prompt，如需恢复原始 prompt 可删除对应临时文件
+3. **终端环境** — 终端继承进程环境，仅为当前会话自定义 prompt，不改写用户 shell 配置文件。
 4. **Git 操作** — 为避免误操作，暂存时会自动过滤 `node_modules`、`.git`、`target` 等目录
 5. **数据存储** — 应用数据（数据库、设置）存储在系统应用数据目录中：
    - macOS: `~/Library/Application Support/com.shiguang.ai-coding/`
