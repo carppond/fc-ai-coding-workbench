@@ -41,7 +41,7 @@ A desktop AI coding workbench integrating Git workflow, terminal, and AI provide
 - PowerShell 7 is preferred, followed by Windows PowerShell and then CMD. Shell detection does not execute profiles; interactive PowerShell loads its normal profiles once and uses UTF-8 input/output. The app does not change execution policy.
 - Terminal search, clear, and close use **Ctrl+Shift+F/K/W** on Windows/Linux. **Ctrl+Shift+C/V** copies/pastes; Ctrl+V and right-click paste remain available. Bare Ctrl+W/F/P remain available to CLI editing/model shortcuts, and Ctrl+C without a selection interrupts. macOS retains Command shortcuts; the file editor still uses Ctrl+W to close.
 - Multiline paste follows the foreground program's bracketed-paste mode, including CLIs launched from PowerShell, rather than guessing from the parent shell.
-- Windows drive, UNC, and `\\?\` paths retain their filesystem spelling when opening/saving files; case and separators are normalized only for project/Git comparisons. CMD switches drives with `cd /d` and uses `pushd` for UNC shares. Paths CMD cannot quote safely are rejected; use PowerShell for those paths.
+- Windows drive, UNC, and `\\?\` paths retain their filesystem spelling when opening/saving files; case and separators are normalized only for project/Git comparisons. Terminals start directly in the project directory; CMD maps UNC shares with `pushd` at startup. UNC paths CMD cannot quote safely are rejected; use PowerShell for those paths.
 - Standard OMP/npm/Bun, Node.js, Git, and PowerShell installation directories are included in tool discovery and terminal PATH. Restart the app after changing a custom PATH location.
 - In-app API keys use **Windows Credential Manager**. If an older Windows build lost a saved key, save it again after updating; this does not affect OMP/Pi's own authentication.
 
@@ -148,7 +148,7 @@ The project includes GitHub Actions for automated builds:
 - **Manual Trigger** — Actions → `Build & Release` → `Run workflow`
 - **Tag Trigger** — Push a `v*` tag to automatically build and create a GitHub Release
 
-Each platform runs `npm run test:file-tree` and `cargo test --locked` before packaging. Windows-only tests cover shell/script execution, literal directory changes, and credential persistence; running the suite on macOS/Linux does not exercise those Windows cases. ConPTY shutdown on older Windows and access to real UNC shares also require Windows runtime verification.
+Each platform runs `npm run test:file-tree` and `cargo test --locked` before packaging. Windows-only tests cover shell/script execution and credential persistence; running the suite on macOS/Linux does not exercise those Windows cases. ConPTY shutdown on older Windows and starting CMD in a real UNC share also require Windows runtime verification.
 
 Build Artifacts:
 

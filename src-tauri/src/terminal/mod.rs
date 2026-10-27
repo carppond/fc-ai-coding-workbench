@@ -70,6 +70,10 @@ pub struct TerminalSession {
     alive: Arc<AtomicBool>,
     pub id: String,
     pub shell_name: String,
+    /// Directory the shell was started in (`None` = process default). The
+    /// working directory is fixed at spawn; nothing is typed into the shell
+    /// afterwards, so a shell that is still running its profile cannot lose it.
+    pub initial_dir: Option<String>,
     output_window: Arc<OutputWindow>,
 }
 
@@ -162,8 +166,24 @@ impl TerminalSession {
                 cmd.args(["-NoLogo", "-NoExit"]);
             }
             "cmd" | "cmd.exe" => {
-                // cmd.exe: /K keeps the shell open, chcp 65001 sets UTF-8 code page
-                cmd.args(["/K", "chcp 65001 >nul"]);
+                // cmd.exe: /K keeps the shell open, chcp 65001 sets UTF-8 code page.
+                // cmd cannot use a UNC working directory; pushd maps the share to
+                // a drive before the prompt appears instead of starting in a
+                // fallback directory and typing a cd later.
+                match initial_dir.filter(|dir| dir.starts_with("\\\\") || dir.starts_with("//")) {
+                    Some(share) => {
+                        let quoted =
+                            crate::coding_cli::quote_path(std::path::Path::new(share), "cmd.exe")
+                                .map_err(|e| e.to_string())?;
+                        cmd.args(["/K", &format!("pushd {quoted} && chcp 65001 >nul")]);
+                    }
+                    None => {
+                        cmd.args(["/K", "chcp 65001 >nul"]);
+                        if let Some(dir) = initial_dir {
+                            cmd.cwd(dir);
+                        }
+                    }
+                }
             }
             _ => {
                 // zsh, sh, etc: login + interactive
@@ -171,8 +191,10 @@ impl TerminalSession {
             }
         }
 
-        if let Some(dir) = initial_dir {
-            cmd.cwd(dir);
+        if !matches!(shell_name.as_str(), "cmd" | "cmd.exe") {
+            if let Some(dir) = initial_dir {
+                cmd.cwd(dir);
+            }
         }
 
         // Inherit environment from parent process
@@ -476,6 +498,7 @@ impl TerminalSession {
             alive,
             id: session_id,
             shell_name: shell_name.clone(),
+            initial_dir: initial_dir.map(str::to_owned),
             output_window,
         })
     }

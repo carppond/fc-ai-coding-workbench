@@ -10,6 +10,7 @@ import { QuickOpen } from "../common/QuickOpen";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useProjectStore } from "../../stores/projectStore";
 import { useI18n } from "../../lib/i18n";
+import { warmupTerminal } from "../../ipc/commands";
 
 export function AppShell() {
   const { loadSettings, loading, preloadEnvCheck } = useSettingsStore();
@@ -28,7 +29,12 @@ export function AppShell() {
 
   useEffect(() => {
     loadSettings();
-    loadProjects();
+    // Pre-spawn shells only once the restored project is known: a pooled shell
+    // is handed out solely for the directory it was started in, so warming up
+    // before this would just fill the pool with home-directory shells.
+    loadProjects().then(() => {
+      warmupTerminal(useProjectStore.getState().activeProject?.path).catch(() => {});
+    });
     loadLocale();
     // Delay env check so it doesn't compete with critical startup rendering
     const id = setTimeout(preloadEnvCheck, 3000);

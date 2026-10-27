@@ -410,9 +410,6 @@ export const resizeTerminal = (sessionId: string, rows: number, cols: number) =>
 export const killTerminal = (sessionId: string) =>
   invoke<void>("kill_terminal", { sessionId });
 
-export const terminalCd = (sessionId: string, path: string) =>
-  invoke<void>("terminal_cd", { sessionId, path });
-
 export const launchCodingCli = (
   sessionId: string,
   cli: CodingCli,

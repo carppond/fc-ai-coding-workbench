@@ -21,12 +21,7 @@ pub fn run() {
             let app_state = AppState::new(app.handle())?;
             app.manage(app_state);
             app.manage(coding_cli::CliLaunchConfig::new()?);
-            app.manage(commands::terminal_commands::TerminalState {
-                sessions: std::sync::Mutex::new(std::collections::HashMap::new()),
-                warmup: std::sync::Arc::new(std::sync::Mutex::new(
-                    std::collections::VecDeque::new(),
-                )),
-            });
+            app.manage(commands::terminal_commands::TerminalState::new());
 
             // 后台清理上次残留的临时文件（不阻塞启动）
             std::thread::spawn(|| {
@@ -146,7 +141,6 @@ pub fn run() {
             commands::terminal_commands::write_terminal,
             commands::terminal_commands::resize_terminal,
             commands::terminal_commands::kill_terminal,
-            commands::terminal_commands::terminal_cd,
             commands::terminal_commands::launch_coding_cli,
             commands::terminal_commands::warmup_terminal,
             commands::terminal_commands::claim_warmup_terminal,

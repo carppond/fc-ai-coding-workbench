@@ -41,7 +41,7 @@
 - 优先使用 PowerShell 7，其次为 Windows PowerShell，最后回退到 CMD。探测 shell 时不执行配置文件；交互式 PowerShell 按标准机制加载配置一次，使用 UTF-8 输入／输出。应用不修改执行策略。
 - Windows／Linux 终端使用 **Ctrl+Shift+F/K/W** 搜索、清屏、关闭，**Ctrl+Shift+C/V** 复制／粘贴；仍支持 Ctrl+V 和右键粘贴。Ctrl+W/F/P 留给 CLI 的编辑／模型快捷键，无选区时 Ctrl+C 中断程序。macOS 保留 Command 快捷键；文件编辑器仍使用 Ctrl+W 关闭。
 - 多行粘贴跟随前台程序的括号粘贴模式，包括 PowerShell 中运行的 CLI，不再根据父 shell 名称猜测。
-- Windows 盘符、UNC 和 `\\?\` 路径在打开／保存文件时保留原始写法，仅在项目与 Git 归属比较时统一大小写和分隔符。CMD 使用 `cd /d` 切换盘符，UNC 共享使用 `pushd`；无法安全引用的 CMD 路径会被拒绝，请改用 PowerShell。
+- Windows 盘符、UNC 和 `\\?\` 路径在打开／保存文件时保留原始写法，仅在项目与 Git 归属比较时统一大小写和分隔符。终端直接在项目目录中启动；CMD 在启动时用 `pushd` 映射 UNC 共享，无法安全引用的 UNC 路径会被拒绝，请改用 PowerShell。
 - 工具检测与终端 PATH 包含 OMP／npm／Bun、Node.js、Git 和 PowerShell 的常见安装目录。修改自定义 PATH 目录后请重启应用。
 - 应用内 API 密钥使用 **Windows 凭据管理器**。旧 Windows 版本若出现保存后丢失密钥的情况，请在更新后重新保存一次；OMP／Pi 自身的登录不受影响。
 
@@ -148,7 +148,7 @@ chmod +x build-dmg.sh
 - **手动触发** — Actions → `Build & Release` → `Run workflow`
 - **Tag 触发** — 推送 `v*` 标签自动构建并创建 GitHub Release
 
-各平台打包前执行 `npm run test:file-tree` 和 `cargo test --locked`。Windows 专用测试覆盖 shell／脚本执行、目录字面路径切换和凭据持久化；在 macOS／Linux 上运行测试不会执行这些 Windows 用例。旧版 Windows 的 ConPTY 关闭、真实 UNC 共享访问仍需 Windows 运行环境验证。
+各平台打包前执行 `npm run test:file-tree` 和 `cargo test --locked`。Windows 专用测试覆盖 shell／脚本执行和凭据持久化；在 macOS／Linux 上运行测试不会执行这些 Windows 用例。旧版 Windows 的 ConPTY 关闭、CMD 在真实 UNC 共享中启动仍需 Windows 运行环境验证。
 
 构建产物：
 

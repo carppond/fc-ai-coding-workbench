@@ -889,7 +889,9 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
       // cwd 优先于 projectPath（自选目录终端）
       const path = cwdRef.current ?? projectPathRef.current;
 
-      // Try to claim a pre-warmed terminal first, fallback to normal spawn
+      // A pooled shell is only handed out if it was started in `path`; otherwise
+      // spawn one there directly. Never `cd` a shell that may still be running
+      // its profile — typed input can be lost on slow machines.
       ipc.claimWarmupTerminal(path ?? undefined, term.rows, term.cols)
         .then(async (result) => {
           if (disposed) {
@@ -897,18 +899,8 @@ export const Terminal = memo(function Terminal({ projectPath, cwd, onAliveChange
             return;
           }
           if (result) {
-            // Got a pre-warmed session — set up listener & subscribe first, then cd
             await setupSession(result[0]);
-            if (disposed) return;
-            if (path) {
-              const el = containerRef.current;
-              if (el) el.style.visibility = "hidden";
-              await ipc.terminalCd(result[0], path).finally(() => {
-                setTimeout(() => { if (el) el.style.visibility = ""; }, 150);
-              });
-            }
           } else {
-            // No warmup available — normal spawn
             const [sessionId] = await ipc.spawnTerminal(path ?? undefined, term.rows, term.cols);
             await setupSession(sessionId);
           }

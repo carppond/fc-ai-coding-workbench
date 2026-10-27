@@ -1,7 +1,6 @@
 use super::run_blocking;
 use crate::coding_cli::{
-    build_launch_command, quote_path, resolve_executable, CliLaunchAction, CodingCli,
-    OmpApprovalMode,
+    build_launch_command, resolve_executable, CliLaunchAction, CodingCli, OmpApprovalMode,
 };
 use crate::errors::{AppError, AppResult};
 use crate::terminal::TerminalSession;
@@ -17,7 +16,100 @@ const WARMUP_POOL_SIZE: usize = 3;
 
 pub struct TerminalState {
     pub sessions: Mutex<HashMap<String, TerminalSession>>,
-    pub warmup: Arc<Mutex<VecDeque<TerminalSession>>>,
+    pub warmup: Arc<Mutex<WarmupPool<TerminalSession>>>,
+}
+
+impl TerminalState {
+    pub fn new() -> Self {
+        Self {
+            sessions: Mutex::new(HashMap::new()),
+            warmup: Arc::new(Mutex::new(WarmupPool::default())),
+        }
+    }
+}
+
+pub trait WarmupItem {
+    fn initial_dir(&self) -> Option<&str>;
+}
+
+impl WarmupItem for TerminalSession {
+    fn initial_dir(&self) -> Option<&str> {
+        self.initial_dir.as_deref()
+    }
+}
+
+/// Pre-spawned shells, all started in `target_dir`. A claim only ever hands
+/// out a shell whose working directory already matches, so the frontend never
+/// has to type `cd` into a shell that may still be running its profile.
+pub struct WarmupPool<S> {
+    target_dir: Option<String>,
+    sessions: VecDeque<S>,
+    /// Spawns in flight; counted so refills do not overshoot the pool size.
+    pending: usize,
+}
+
+impl<S> Default for WarmupPool<S> {
+    fn default() -> Self {
+        Self {
+            target_dir: None,
+            sessions: VecDeque::new(),
+            pending: 0,
+        }
+    }
+}
+
+fn same_dir(a: Option<&str>, b: Option<&str>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => Path::new(a) == Path::new(b),
+        _ => false,
+    }
+}
+
+impl<S: WarmupItem> WarmupPool<S> {
+    /// Point the pool at `dir`; returns the sessions that no longer belong
+    /// (caller drops them outside the lock) and how many spawns to start.
+    fn retarget(&mut self, dir: Option<String>) -> (Vec<S>, usize) {
+        self.target_dir = dir;
+        let target = self.target_dir.as_deref();
+        let mut evicted = Vec::new();
+        let mut keep = VecDeque::with_capacity(self.sessions.len());
+        for session in self.sessions.drain(..) {
+            if same_dir(session.initial_dir(), target) {
+                keep.push_back(session);
+            } else {
+                evicted.push(session);
+            }
+        }
+        self.sessions = keep;
+        let need = WARMUP_POOL_SIZE.saturating_sub(self.sessions.len() + self.pending);
+        self.pending += need;
+        (evicted, need)
+    }
+
+    /// A spawn started by `retarget` finished. `Some(session)` is kept only if
+    /// the pool still wants that directory and has room; otherwise it is
+    /// returned for the caller to drop outside the lock.
+    fn finish_spawn(&mut self, session: Option<S>) -> Option<S> {
+        self.pending = self.pending.saturating_sub(1);
+        let session = session?;
+        if same_dir(session.initial_dir(), self.target_dir.as_deref())
+            && self.sessions.len() < WARMUP_POOL_SIZE
+        {
+            self.sessions.push_back(session);
+            None
+        } else {
+            Some(session)
+        }
+    }
+
+    fn claim(&mut self, dir: Option<&str>) -> Option<S> {
+        let index = self
+            .sessions
+            .iter()
+            .position(|session| same_dir(session.initial_dir(), dir))?;
+        self.sessions.remove(index)
+    }
 }
 
 /// Match an actual executable or its Node/Bun entry script, never arbitrary
@@ -246,52 +338,45 @@ pub async fn launch_coding_cli(
         .map_err(AppError::General)
 }
 
-#[tauri::command]
-pub fn terminal_cd(state: State<TerminalState>, session_id: String, path: String) -> AppResult<()> {
-    let sessions = state
-        .sessions
-        .lock()
-        .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
-    if let Some(session) = sessions.get(&session_id) {
-        let cmd = build_cd_command(&session.shell_name, &path)?;
-        session.write(&cmd).map_err(|e| AppError::General(e))?;
-    }
-    Ok(())
-}
-
+/// Fill the pool with shells started in `initial_dir`. Shells pooled for a
+/// different directory are discarded: a claim must never hand out a shell
+/// that would need a typed `cd`.
 #[tauri::command]
 pub async fn warmup_terminal(
     app: AppHandle,
     state: State<'_, TerminalState>,
     initial_dir: Option<String>,
 ) -> AppResult<()> {
-    // 计算还需预热几个，把池补满到 WARMUP_POOL_SIZE
-    let need = {
-        let warmup = state
-            .warmup
-            .lock()
-            .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
-        WARMUP_POOL_SIZE.saturating_sub(warmup.len())
-    };
-    if need == 0 {
-        return Ok(());
+    let (evicted, need) = state
+        .warmup
+        .lock()
+        .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?
+        .retarget(initial_dir.clone());
+
+    // Dropping a session kills its shell and waits for it; keep that off the
+    // async runtime and outside the pool lock.
+    if !evicted.is_empty() {
+        tauri::async_runtime::spawn(async move {
+            let _ = run_blocking(move || {
+                drop(evicted);
+                Ok(())
+            })
+            .await;
+        });
     }
 
-    // Creation and excess-session cleanup share the bounded blocking executor.
     for _ in 0..need {
         let app = app.clone();
         let dir = initial_dir.clone();
         let warmup_arc = Arc::clone(&state.warmup);
         tauri::async_runtime::spawn(async move {
             let _ = run_blocking(move || {
-                let session = TerminalSession::spawn(app, dir.as_deref(), 24, 80)
-                    .map_err(AppError::General)?;
-                let mut warmup = warmup_arc
+                let spawned = TerminalSession::spawn(app, dir.as_deref(), 24, 80).ok();
+                let rejected = warmup_arc
                     .lock()
-                    .map_err(|_| AppError::General("Terminal state lock poisoned".into()))?;
-                if warmup.len() < WARMUP_POOL_SIZE {
-                    warmup.push_back(session);
-                }
+                    .map_err(|_| AppError::General("Terminal state lock poisoned".into()))?
+                    .finish_spawn(spawned);
+                drop(rejected);
                 Ok(())
             })
             .await;
@@ -301,21 +386,20 @@ pub async fn warmup_terminal(
     Ok(())
 }
 
+/// Hand out a pooled shell already running in `initial_dir`, or `None` so the
+/// caller spawns one there directly.
 #[tauri::command]
 pub fn claim_warmup_terminal(
     state: State<TerminalState>,
-    _initial_dir: Option<String>,
+    initial_dir: Option<String>,
     rows: Option<u16>,
     cols: Option<u16>,
 ) -> AppResult<Option<(String, String)>> {
-    // Take a warmup session out of the pool
-    let session = {
-        let mut warmup = state
-            .warmup
-            .lock()
-            .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?;
-        warmup.pop_front()
-    };
+    let session = state
+        .warmup
+        .lock()
+        .map_err(|_| AppError::General("Terminal state lock poisoned".to_string()))?
+        .claim(initial_dir.as_deref());
 
     let session = match session {
         Some(s) => s,
@@ -326,10 +410,6 @@ pub fn claim_warmup_terminal(
     let r = rows.unwrap_or(24);
     let c = cols.unwrap_or(80);
     session.resize(r, c).map_err(AppError::General)?;
-
-    // 不在此处发送 cd 命令——前端需要先挂载 event listener，
-    // 否则 cd+clear 的输出（包括 shell prompt）会在 listener 就绪前丢失。
-    // 前端在 setupSession 后会调用 terminal_cd。
 
     let session_id = session.id.clone();
     let shell_name = session.shell_name.clone();
@@ -376,139 +456,85 @@ pub fn acknowledge_terminal_output(
     Ok(())
 }
 
-/// Build a cd + clear command appropriate for the given shell.
-fn build_cd_command(shell_name: &str, path: &str) -> AppResult<String> {
-    let quoted = quote_path(Path::new(path), shell_name)?;
-    let shell = shell_name
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or(shell_name)
-        .to_ascii_lowercase();
-    Ok(match shell.as_str() {
-        "cmd" | "cmd.exe" => {
-            // cmd cannot use a UNC working directory. pushd temporarily maps
-            // the share to a drive; local paths use /d to switch drives too.
-            // quote_path rejects expansion characters rather than changing
-            // the target or changing the user's delayed-expansion settings.
-            if path.starts_with("\\\\") || path.starts_with("//") {
-                format!("pushd {quoted} && cls\r")
-            } else {
-                format!("cd /d {quoted} && cls\r")
-            }
-        }
-        "pwsh" | "pwsh.exe" | "powershell" | "powershell.exe" => {
-            // -Path interprets brackets as wildcards, even inside quotes.
-            format!(" Set-Location -LiteralPath {quoted}; if ($?) {{ Clear-Host }}\r")
-        }
-        _ => {
-            // Leading space prevents a shell history entry.
-            format!(" cd -- {quoted} && clear\r")
-        }
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    impl WarmupItem for Option<String> {
+        fn initial_dir(&self) -> Option<&str> {
+            self.as_deref()
+        }
+    }
+
+    fn fill(pool: &mut WarmupPool<Option<String>>, dir: Option<&str>) {
+        let (_, need) = pool.retarget(dir.map(str::to_owned));
+        for _ in 0..need {
+            assert!(pool.finish_spawn(Some(dir.map(str::to_owned))).is_none());
+        }
+    }
+
     #[test]
-    fn cd_rejects_terminal_controls_and_cmd_expansion_instead_of_changing_the_path() {
-        for path in ["C:\\%USERPROFILE%", "C:\\literal!name", "C:\\a\"b"] {
-            assert!(build_cd_command("cmd.exe", path).is_err(), "{path:?}");
-        }
-        for shell in ["cmd.exe", "powershell.exe", "pwsh.exe", "bash", "fish"] {
-            for path in ["C:\\work\rcalc", "C:\\work\ncalc", "C:\\work\u{1b}[2J"] {
-                assert!(build_cd_command(shell, path).is_err(), "{shell}: {path:?}");
-            }
-        }
-    }
+    fn claim_only_returns_shells_started_in_the_requested_directory() {
+        let mut pool = WarmupPool::<Option<String>>::default();
+        fill(&mut pool, None);
+        assert_eq!(pool.sessions.len(), WARMUP_POOL_SIZE);
 
-    #[cfg(windows)]
-    #[tokio::test]
-    async fn powershell_cd_uses_literal_paths_and_keeps_location_errors_visible() {
-        let directory = std::env::temp_dir().join(format!("shiguang-cd-{}", uuid::Uuid::new_v4()));
-        let target = directory.join("中文 O'Brien [work] & space");
-        let wildcard_match = directory.join("中文 O'Brien w & space");
-        std::fs::create_dir_all(&target).unwrap();
-        std::fs::create_dir(&wildcard_match).unwrap();
-        let missing = directory.join("missing");
-        let path = crate::commands::setup_commands::user_shell_path();
-        let legacy = crate::coding_cli::resolve_program("powershell.exe", path).unwrap();
-        let modern = crate::coding_cli::resolve_program("pwsh.exe", path).ok();
-        for shell in std::iter::once(legacy).chain(modern) {
-            let shell_name = shell.file_name().unwrap().to_str().unwrap();
-            let cd = build_cd_command(shell_name, target.to_str().unwrap()).unwrap();
-            let bad_cd = build_cd_command(shell_name, missing.to_str().unwrap()).unwrap();
-            let mut command = tokio::process::Command::new(&shell);
-            command
-                .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"])
-                .arg(format!(
-                    "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); \
-                 function Clear-Host {{}}; \
-                 {cd}; [Console]::WriteLine((Get-Location).Path); \
-                 function Clear-Host {{ [Console]::WriteLine('UNEXPECTED_CLEAR') }}; \
-                 {bad_cd}; exit 0"
-                ));
-            let result = crate::commands::command_output_with_timeout(
-                &mut command,
-                std::time::Duration::from_secs(20),
-                None,
-            )
-            .await;
-            let output = result.unwrap();
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            let stdout = String::from_utf8(output.stdout).unwrap();
-            assert!(
-                stdout.lines().any(|line| line == target.to_str().unwrap()),
-                "{stdout}"
-            );
-            assert!(!stdout.contains("UNEXPECTED_CLEAR"), "{stdout}");
-            assert!(String::from_utf8_lossy(&output.stderr).contains("missing"));
-        }
-        std::fs::remove_dir_all(directory).unwrap();
-    }
+        // Pool holds process-default shells: a project claim must miss so the
+        // caller spawns in the project, instead of getting a home-directory shell.
+        assert_eq!(pool.claim(Some("/work/project")), None);
+        assert_eq!(pool.claim(None), Some(None));
+        assert_eq!(pool.sessions.len(), WARMUP_POOL_SIZE - 1);
 
-    #[cfg(windows)]
-    #[tokio::test]
-    async fn cmd_cd_preserves_quoted_directory_characters() {
-        let directory =
-            std::env::temp_dir().join(format!("shiguang-cmd-cd-{}", uuid::Uuid::new_v4()));
-        let target = directory.join("中文 O'Brien [work] & space");
-        std::fs::create_dir_all(&target).unwrap();
-        let cd = build_cd_command("cmd.exe", target.to_str().unwrap()).unwrap();
-        let shell = crate::coding_cli::resolve_program(
-            "cmd.exe",
-            crate::commands::setup_commands::user_shell_path(),
-        )
-        .unwrap();
-        let mut command = tokio::process::Command::new(shell);
-        command.args(["/D", "/Q", "/V:ON", "/C"]).arg(format!(
-            "chcp 65001 >nul & {} & cd",
-            cd.trim_end_matches('\r')
-        ));
-        let result = crate::commands::command_output_with_timeout(
-            &mut command,
-            std::time::Duration::from_secs(20),
-            None,
-        )
-        .await;
-        std::fs::remove_dir_all(directory).unwrap();
-        let output = result.unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let stdout = String::from_utf8(output.stdout).unwrap();
-        assert!(
-            stdout.lines().any(|line| line == target.to_str().unwrap()),
-            "{stdout}"
+        fill(&mut pool, Some("/work/project"));
+        assert_eq!(pool.claim(None), None);
+        // Trailing separator is the same directory.
+        assert_eq!(
+            pool.claim(Some("/work/project/")),
+            Some(Some("/work/project".into()))
         );
     }
+
+    #[test]
+    fn retarget_evicts_other_directories_and_refills_without_overshooting() {
+        let mut pool = WarmupPool::<Option<String>>::default();
+        fill(&mut pool, None);
+
+        let (evicted, need) = pool.retarget(Some("/work/project".into()));
+        assert_eq!(evicted, vec![None; WARMUP_POOL_SIZE]);
+        assert_eq!(need, WARMUP_POOL_SIZE);
+        assert!(pool.sessions.is_empty());
+
+        // A refill requested while spawns are in flight adds nothing.
+        let (evicted, need) = pool.retarget(Some("/work/project/".into()));
+        assert!(evicted.is_empty());
+        assert_eq!(need, 0);
+
+        // A failed spawn only releases its slot; the next refill replaces it.
+        assert!(pool.finish_spawn(Some(Some("/work/project".into()))).is_none());
+        assert!(pool.finish_spawn(None).is_none());
+        assert!(pool.finish_spawn(Some(Some("/work/project".into()))).is_none());
+        assert_eq!(pool.sessions.len(), 2);
+        let (_, need) = pool.retarget(Some("/work/project".into()));
+        assert_eq!(need, 1);
+    }
+
+    #[test]
+    fn spawns_finishing_after_a_retarget_are_rejected_instead_of_pooled() {
+        let mut pool = WarmupPool::<Option<String>>::default();
+        let (_, need) = pool.retarget(Some("/old".into()));
+        assert_eq!(need, WARMUP_POOL_SIZE);
+        pool.retarget(Some("/new".into()));
+
+        assert_eq!(
+            pool.finish_spawn(Some(Some("/old".into()))),
+            Some(Some("/old".into()))
+        );
+        assert!(pool.sessions.is_empty());
+        assert!(pool.finish_spawn(Some(Some("/new".into()))).is_none());
+        assert_eq!(pool.claim(Some("/old")), None);
+        assert_eq!(pool.claim(Some("/new")), Some(Some("/new".into())));
+    }
+
     #[test]
     fn cli_detection_matches_entrypoints_not_prompt_arguments_or_name_substrings() {
         let directory =
